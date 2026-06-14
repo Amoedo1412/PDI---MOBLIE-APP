@@ -26,6 +26,7 @@ export default function GestaoEmenta() {
   const [ementaIDs, setEmentaIDs] = useState<string[]>([]);
   const [diaFechado, setDiaFechado] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingNewsletter, setLoadingNewsletter] = useState(false);
   const [modalVisivel, setModalVisivel] = useState(false);
   const [pesquisa, setPesquisa] = useState('');
 
@@ -90,6 +91,73 @@ export default function GestaoEmenta() {
     } catch (e) { Alert.alert("Erro", "Falha na rotação."); setLoading(false); }
   }
 
+  async function confirmarNewsletter() {
+    Alert.alert(
+      "Enviar Newsletter",
+      "Queres avisar todos os subscritores que a nova ementa já está disponível na app?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { text: "Sim, Enviar", onPress: enviarNewsletter }
+      ]
+    );
+  }
+
+  async function enviarNewsletter() {
+    setLoadingNewsletter(true);
+    try {
+      // 1. Quem quer receber?
+      const { data: perfis } = await supabase.from('perfis').select('id').eq('receber_newsletter', true);
+      
+      if (!perfis || perfis.length === 0) {
+        Alert.alert('Aviso', 'Nenhum cliente subscreveu a newsletter ainda.');
+        setLoadingNewsletter(false);
+        return;
+      }
+      
+      const userIds = perfis.map(p => p.id);
+      const titulo = 'Nova Ementa da Semana! 🍽️';
+      const corpo = 'Já atualizámos os pratos. Vem ver o que preparámos para ti no Restaurante Norton!';
+
+      // CORREÇÃO: Usar user_id em vez de cliente_id
+      const novasNotificacoes = userIds.map(id => ({
+        user_id: id,
+        tipo: 'newsletter_ementa',
+        titulo: titulo,
+        corpo: corpo
+      }));
+      await supabase.from('notificacoes').insert(novasNotificacoes);
+
+      // CORREÇÃO: Usar user_id em vez de cliente_id
+      const { data: tokens } = await supabase.from('push_tokens').select('token').in('user_id', userIds);
+
+      if (tokens && tokens.length > 0) {
+        const messages = tokens.map(t => ({
+          to: t.token,
+          sound: 'default',
+          title: titulo,
+          body: corpo,
+        }));
+
+        await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Accept-encoding': 'gzip, deflate',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(messages),
+        });
+      }
+
+      Alert.alert('Sucesso!', `Newsletter enviada com sucesso para ${userIds.length} clientes.`);
+    } catch (error) {
+      Alert.alert('Erro', 'Falha ao enviar newsletter.');
+      console.log(error);
+    } finally {
+      setLoadingNewsletter(false);
+    }
+  }
+
   const pratosDaEmenta = pratos.filter(p => ementaIDs.includes(String(p.id)));
   const pratosFiltrados = pratos.filter(p => p.nome.toLowerCase().includes(pesquisa.toLowerCase()));
 
@@ -109,9 +177,16 @@ export default function GestaoEmenta() {
             </Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity style={styles.btnCiclo} onPress={confirmarAvancoCiclo}>
-          <Ionicons name="calendar" size={24} color={isDark ? '#0A84FF' : '#007AFF'} />
-        </TouchableOpacity>
+        
+        {/* BOTÕES DE ACÃO DO CABEÇALHO */}
+        <View style={styles.headerAcoes}>
+          <TouchableOpacity style={styles.btnHeaderIcon} onPress={confirmarNewsletter} disabled={loadingNewsletter}>
+            {loadingNewsletter ? <ActivityIndicator size="small" color="#28A745" /> : <Ionicons name="megaphone" size={24} color={isDark ? '#34C759' : '#28A745'} />}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.btnHeaderIcon} onPress={confirmarAvancoCiclo}>
+            <Ionicons name="calendar" size={24} color={isDark ? '#0A84FF' : '#007AFF'} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={[styles.tabContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -213,7 +288,10 @@ const styles = StyleSheet.create({
   semanaContainer: { flexDirection: 'row', paddingHorizontal: 20, paddingTop: 0, alignItems: 'center', borderBottomWidth: 1 },
   tabSemana: { paddingVertical: 15, marginRight: 25, borderBottomWidth: 2, borderColor: 'transparent' },
   txtSemana: { fontSize: 15, fontWeight: '800' },
-  btnCiclo: { marginLeft: 'auto', padding: 10 },
+  
+  headerAcoes: { flexDirection: 'row', marginLeft: 'auto', alignItems: 'center' },
+  btnHeaderIcon: { padding: 10, marginLeft: 5 },
+
   tabContainer: { paddingVertical: 15, borderBottomWidth: 1 },
   tabsScroll: { paddingHorizontal: 20 },
   tab: { paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20, marginRight: 10, borderWidth: 1 },
