@@ -19,6 +19,7 @@ export default function Pedidos() {
   useEffect(() => {
     carregarPedidos();
     
+    // @ts-ignore
     const sub = supabase.channel('pedidos_admin')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'pedidos' }, 
@@ -48,18 +49,19 @@ export default function Pedidos() {
     setLoading(false);
   }
 
-  const confirmarAcao = (id: string, novoStatus: string, mensagemBotao: string) => {
+  const confirmarAcao = (id: string, novoStatus: string, mensagemBotao: string, clienteId: string) => {
     Alert.alert(
       "Confirmar Ação",
       `Tens a certeza que queres ${mensagemBotao.toLowerCase()}?`,
       [
         { text: "Cancelar", style: "cancel" },
-        { text: "Sim, Confirmar", onPress: () => atualizarStatus(id, novoStatus) }
+        { text: "Sim, Confirmar", onPress: () => atualizarStatus(id, novoStatus, clienteId) }
       ]
     );
   };
 
-  async function atualizarStatus(id: string, novoStatus: string) {
+  async function atualizarStatus(id: string, novoStatus: string, clienteId: string) {
+    // 1. Atualiza o estado na Base de Dados
     const { error } = await supabase
       .from('pedidos')
       .update({ status: novoStatus })
@@ -67,8 +69,63 @@ export default function Pedidos() {
     
     if (error) {
       Alert.alert('Erro de Permissão', error.message);
-    } else {
-      carregarPedidos();
+      return;
+    } 
+
+    carregarPedidos();
+
+    // 2. Prepara os textos da notificação
+    let pushTitle = '';
+    let pushBody = '';
+
+    if (novoStatus === 'confirmado') {
+      pushTitle = 'Pedido Confirmado! 👨‍🍳';
+      pushBody = 'A cozinha já está a preparar o teu pedido de Take-Away.';
+    } else if (novoStatus === 'pronto') {
+      pushTitle = 'O teu pedido está pronto! 🛍️';
+      pushBody = 'Já podes passar no Restaurante Norton para levantar a tua refeição.';
+    }
+
+    if (pushTitle) {
+      try {
+        // 3. GRAVA NO HISTÓRICO DE NOTIFICAÇÕES DO CLIENTE (com o ID do pedido para abrir o Modal)
+        await supabase.from('notificacoes').insert([{ 
+          user_id: clienteId, 
+          tipo: 'pedido_status', 
+          titulo: pushTitle, 
+          corpo: pushBody, 
+          lida: false,
+          data: { pedido_id: id } 
+        }]);
+
+        // 4. ENVIA A PUSH NOTIFICATION PARA O TELEMÓVEL
+        const { data: tokens } = await supabase
+          .from('push_tokens')
+          .select('token')
+          .eq('user_id', clienteId);
+
+        if (tokens && tokens.length > 0) {
+          const messages = tokens.map(t => ({
+            to: t.token,
+            sound: 'default',
+            title: pushTitle,
+            body: pushBody,
+            data: { pedido_id: id, status: novoStatus }
+          }));
+
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Accept-encoding': 'gzip, deflate',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(messages),
+          });
+        }
+      } catch (err) {
+        console.log('Erro Push:', err);
+      }
     }
   }
 
@@ -146,7 +203,11 @@ export default function Pedidos() {
           </View>
           
           <TouchableOpacity 
-            style={[styles.btnOrder, { backgroundColor: theme.bg, borderColor: theme.border }, ordenarPorTempo === 'recolha' && { backgroundColor: theme.iconBg, borderColor: theme.orange }]}
+            style={[
+              styles.btnOrder, 
+              { backgroundColor: theme.bg, borderColor: theme.border }, 
+              ordenarPorTempo === 'recolha' && { backgroundColor: theme.iconBg, borderColor: theme.orange }
+            ]}
             onPress={() => setOrdenarPorTempo(prev => prev === 'recente' ? 'recolha' : 'recente')}
           >
             <Ionicons name="time-outline" size={22} color={ordenarPorTempo === 'recolha' ? theme.orange : theme.subText} />
@@ -179,11 +240,11 @@ export default function Pedidos() {
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={{ padding: 20, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
+          renderItem={({ item }: { item: any }) => {
             const config = getConfigStatus(item.status);
             const isNovo = item.status === 'pendente';
             
-            const partes = item.prato_nome.split('\n');
+            const partes = (item.prato_nome || '').split('\n');
             const comida = partes[0].split(', ').join('\n');
             const extrasENotas = partes.slice(1).join('\n');
 
@@ -242,10 +303,10 @@ export default function Pedidos() {
                     <Text style={[styles.totalValue, { color: theme.text }]}>{parseFloat(item.total_preco || 0).toFixed(2)}€</Text>
                   </View>
                   
-                  {abaAtiva === 'ativos' && (
+                  {abaAtiva === 'ativos' && config.proxStatus !== '' && (
                     <TouchableOpacity 
                       style={[styles.btnAcao, { backgroundColor: config.btnCor }]} 
-                      onPress={() => confirmarAcao(item.id, config.proxStatus, config.btnTexto)}
+                      onPress={() => confirmarAcao(item.id, config.proxStatus, config.btnTexto, item.cliente_id)}
                     >
                       <Text style={styles.btnText}>{config.btnTexto}</Text>
                       <Ionicons name={config.iconeBtn as any} size={16} color="#FFF" />
