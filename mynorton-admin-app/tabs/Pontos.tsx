@@ -17,7 +17,7 @@ export default function Pontos() {
   const [historico, setHistorico] = useState<any[]>([]);
   const [abaVouchers, setAbaVouchers] = useState<'ativos' | 'historico'>('ativos');
   const [valorFatura, setValorFatura] = useState('');
-  
+
   const [scanner, setScanner] = useState(false);
   const isScanning = useRef(false);
   const [permission, requestPermission] = useCameraPermissions();
@@ -26,25 +26,24 @@ export default function Pontos() {
 
   useEffect(() => {
     if (!cliente?.id) return;
-
     const subscription = supabase.channel(`admin_cliente_${cliente.id}`)
       .on(
-        'postgres_changes', 
-        { event: '*', schema: 'public', table: 'vouchers', filter: `perfil_id=eq.${cliente.id}` }, 
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'vouchers', filter: `perfil_id=eq.${cliente.id}` },
         () => carregarDadosAdicionais(cliente.id)
       )
       .on(
-        'postgres_changes', 
-        { event: 'UPDATE', schema: 'public', table: 'pontos', filter: `id_cliente=eq.${cliente.id}` }, 
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'pontos', filter: `id_cliente=eq.${cliente.id}` },
         (payload: any) => { if (payload.new) setSaldoAtual(payload.new.saldo); }
       )
       .on(
-        'postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'log_pontos', filter: `cliente_id=eq.${cliente.id}` }, 
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'log_pontos', filter: `cliente_id=eq.${cliente.id}` },
         () => carregarDadosAdicionais(cliente.id)
       )
       .subscribe();
-
+      
     return () => {
       supabase.removeChannel(subscription);
     };
@@ -53,46 +52,40 @@ export default function Pontos() {
   async function buscarCliente(termoBusca: string) {
     const limpo = termoBusca.trim();
     if (!limpo) return;
-    
+
     setLoading(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
       const adminLogado = authData?.user;
-
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(limpo);
-      
+
       let query = supabase.from('perfis').select('*');
       if (isUUID) {
         query = query.eq('id', limpo);
       } else {
         query = query.eq('telemovel', limpo);
       }
-
       const { data: perfilData } = await query.maybeSingle();
-      
+
       if (!perfilData) {
         Alert.alert("Não Encontrado", "Cliente não encontrado. Verifica o número ou código QR.");
         setLoading(false);
         return;
       }
-
       if (adminLogado?.id === perfilData.id) {
-        Alert.alert("Ação Bloqueada 🛑", "Não podes gerir os teus próprios pontos.");
+        Alert.alert("Ação Bloqueada  🛑 ", "Não podes gerir os teus próprios pontos.");
         setLoading(false);
         return;
       }
-
+      
       setCliente(perfilData);
-
       const { data: saldoData } = await supabase.from('pontos').select('saldo').eq('id_cliente', perfilData.id).maybeSingle();
       setSaldoAtual(saldoData?.saldo || 0);
-
       carregarDadosAdicionais(perfilData.id);
-
-    } catch (err) { 
-      Alert.alert("Erro", "Erro ao ligar à base de dados."); 
-    } finally { 
-      setLoading(false); 
+    } catch (err) {
+      Alert.alert("Erro", "Erro ao ligar à base de dados.");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -102,25 +95,45 @@ export default function Pontos() {
       .select('*')
       .eq('perfil_id', clienteId)
       .eq('usado', false);
-    
-    if (vAtivos) setVouchers(vAtivos);
 
+    if (vAtivos) setVouchers(vAtivos);
+    
     const { data: logs } = await supabase
       .from('log_pontos')
       .select('*')
       .eq('cliente_id', clienteId)
       .order('created_at', { ascending: false });
-    
+
     if (logs) setHistorico(logs);
+  }
+
+  // NOVO: Função para disparar a notificação
+  async function enviarNotificacao(uid: string, tipo: string, titulo: string, corpo: string) {
+    try {
+      // 1. Grava no Histórico In-App (Sino)
+      await supabase.from('notificacoes').insert([{ user_id: uid, tipo, titulo, corpo, lida: false }]);
+      
+      // 2. Dispara a Notificação Push para vibrar o telemóvel
+      const { data: tokens } = await supabase.from('push_tokens').select('token').eq('user_id', uid);
+      if (tokens && tokens.length > 0) {
+        const msgs = tokens.map((t: any) => ({ to: t.token, sound: 'default', title: titulo, body: corpo }));
+        await fetch('https://exp.host/--/api/v2/push/send', { 
+          method: 'POST', 
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(msgs) 
+        });
+      }
+    } catch (err) { 
+      console.log('Erro Push Pontos:', err); 
+    }
   }
 
   async function processarFatura() {
     if (!cliente || !valorFatura) return;
     const valorEur = parseFloat(valorFatura.replace(',', '.'));
     if (isNaN(valorEur) || valorEur <= 0) return Alert.alert("Valor Inválido", "Insere um valor correto.");
-
     const pontosGanhos = Math.floor(valorEur);
-    
+
     Alert.alert("Confirmar", `Atribuir ${pontosGanhos} pontos?`, [
       { text: "Cancelar" },
       { text: "Confirmar", onPress: () => atribuirPontos(pontosGanhos) }
@@ -131,14 +144,23 @@ export default function Pontos() {
     setProcessando(true);
     const novoSaldo = saldoAtual + pontos;
     const { data: { user } } = await supabase.auth.getUser();
-
+    
     await supabase.from('pontos').upsert({ id_cliente: cliente.id, saldo: novoSaldo });
-    await supabase.from('log_pontos').insert({ 
-      cliente_id: cliente.id, 
-      admin_id: user?.id, 
+    
+    await supabase.from('log_pontos').insert({
+      cliente_id: cliente.id,
+      admin_id: user?.id,
       quantidade: pontos,
       nota: 'Atribuição de pontos na fatura'
     });
+
+    // NOVO: Notificar Cliente da Atribuição de Pontos
+    await enviarNotificacao(
+      cliente.id, 
+      'pontos_vouchers', 
+      'Pontos Recebidos! 🎉', 
+      `Foram adicionados ${pontos} pontos à tua conta na tua última visita.`
+    );
 
     setSaldoAtual(novoSaldo);
     setValorFatura('');
@@ -153,16 +175,23 @@ export default function Pontos() {
       { text: "Sim, Usar", style: 'destructive', onPress: async () => {
         const { data: { user } } = await supabase.auth.getUser();
         const { error } = await supabase.from('vouchers').update({ usado: true }).eq('id', voucher.id);
-        
+
         if (!error) {
-          // Inserção no log a incluir o nome específico do voucher usado
-          await supabase.from('log_pontos').insert({ 
-            cliente_id: cliente.id, 
+          await supabase.from('log_pontos').insert({
+            cliente_id: cliente.id,
             admin_id: user?.id,
-            quantidade: 0, 
-            nota: `Utilizou: ${voucher.titulo}` 
+            quantidade: 0,
+            nota: `Utilizou: ${voucher.titulo}`
           });
-          
+
+          // NOVO: Notificar Cliente do Desconto do Voucher
+          await enviarNotificacao(
+            cliente.id, 
+            'pontos_vouchers', 
+            'Voucher Utilizado! ✅', 
+            `A tua oferta "${voucher.titulo}" foi descontada com sucesso na caixa.`
+          );
+
           carregarDadosAdicionais(cliente.id);
           Alert.alert("Sucesso", "Voucher descontado com sucesso!");
         }
@@ -182,13 +211,13 @@ export default function Pontos() {
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-      
+
       <Modal visible={scanner} animationType="fade">
         <View style={styles.cameraFull}>
-          <CameraView 
-            style={StyleSheet.absoluteFillObject} 
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={({ data }) => { 
+            onBarcodeScanned={({ data }) => {
               if (isScanning.current) return;
               isScanning.current = true;
               setScanner(false);
@@ -208,17 +237,19 @@ export default function Pontos() {
       <View style={[styles.header, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <Text style={[styles.titulo, { color: theme.text }]}>Pontos & Vouchers</Text>
         <View style={styles.searchRow}>
-          <TextInput 
-            style={[styles.input, { backgroundColor: theme.bg, color: '#FF0000', borderColor: theme.border }]}
-            placeholder="Nº Telemóvel..." 
+          <TextInput
+            style={[styles.input, { backgroundColor: theme.bg, color: theme.text, borderColor: theme.border }]}
+            placeholder="Nº Telemóvel..."
             placeholderTextColor={theme.subText}
-            value={busca} onChangeText={setBusca} keyboardType="numeric"
+            value={busca} 
+            onChangeText={setBusca} 
+            keyboardType="numeric"
           />
           <TouchableOpacity style={[styles.btnBlack, { backgroundColor: isDark ? '#333' : '#000' }]} onPress={() => buscarCliente(busca)}>
             <Ionicons name="search" size={20} color="#FFF" />
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btnOrange, { backgroundColor: theme.orange }]} onPress={async () => { 
-            const { granted } = await requestPermission(); 
+          <TouchableOpacity style={[styles.btnOrange, { backgroundColor: theme.orange }]} onPress={async () => {
+            const { granted } = await requestPermission();
             if (granted) { isScanning.current = false; setScanner(true); }
           }}>
             <Ionicons name="qr-code" size={20} color="#FFF" />
@@ -233,21 +264,21 @@ export default function Pontos() {
               <TouchableOpacity style={styles.btnLimparCliente} onPress={limparCliente}>
                 <Ionicons name="close" size={24} color={theme.subText} />
               </TouchableOpacity>
-
               <Text style={[styles.nomeCli, { color: theme.text }]}>{cliente.nome}</Text>
               <Text style={[styles.tlmCli, { color: theme.subText }]}>{cliente.telemovel}</Text>
               <View style={styles.saldoRow}>
                 <Text style={[styles.saldoVal, { color: theme.orange }]}>{saldoAtual}</Text>
                 <Text style={[styles.saldoLabel, { color: theme.subText }]}>PONTOS DISPONÍVEIS</Text>
               </View>
-
               <View style={[styles.faturaBox, { borderColor: theme.border }]}>
                 <Text style={[styles.faturaLabel, { color: theme.subText }]}>VALOR DA FATURA (€)</Text>
                 <View style={styles.faturaInputRow}>
-                  <TextInput 
-                    style={[styles.inputFatura, { backgroundColor: theme.bg, color: theme.text }]} 
-                    value={valorFatura} 
-                    onChangeText={setValorFatura} keyboardType="numeric" placeholder="0.00"
+                  <TextInput
+                    style={[styles.inputFatura, { backgroundColor: theme.bg, color: theme.text }]}
+                    value={valorFatura}
+                    onChangeText={setValorFatura} 
+                    keyboardType="numeric" 
+                    placeholder="0.00"
                     placeholderTextColor={theme.subText}
                   />
                   <TouchableOpacity style={[styles.btnAtribuir, { backgroundColor: theme.orange }]} onPress={processarFatura}>
@@ -282,22 +313,16 @@ export default function Pontos() {
               historico.length > 0 ? historico.map(h => {
                 const isAtribuicao = h.quantidade > 0;
                 const isResgate = h.quantidade < 0;
-                
-                // Se houver nota guardada na BD mostra a nota, senão usa as labels padrão
                 const labelHistorico = h.nota ? h.nota : (isAtribuicao ? "Atribuição" : (isResgate ? "Resgate Voucher" : "Voucher Utilizado"));
-                
                 const dataObj = new Date(h.created_at);
                 const dataStr = dataObj.toLocaleDateString('pt-PT');
                 const horaStr = dataObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
-
                 return (
                   <View key={h.id} style={[styles.itemHist, { backgroundColor: theme.card }]}>
                     <View style={{flex: 1, paddingRight: 10 }}>
                       <Text style={[styles.histData, { color: theme.subText }]}>{dataStr} às {horaStr}</Text>
                       <Text style={[styles.histNota, { color: theme.text }]} numberOfLines={2}>{labelHistorico}</Text>
                     </View>
-                    
-                    {/* Lógica Inteligente para distinguir transações numéricas de consumo de voucher */}
                     {isAtribuicao || isResgate ? (
                       <Text style={[styles.histPts, { color: isAtribuicao ? '#34C759' : '#FF3B30' }]}>
                         {isAtribuicao ? `+${h.quantidade}` : h.quantidade}
@@ -329,7 +354,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, height: 50, borderRadius: 12, paddingHorizontal: 15, fontSize: 16, borderWidth: 1 },
   btnBlack: { width: 50, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   btnOrange: { width: 50, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  
+
   cardCliente: { position: 'relative', borderRadius: 20, padding: 20, elevation: 4, shadowOpacity: 0.1, shadowRadius: 10, marginBottom: 25 },
   btnLimparCliente: { position: 'absolute', top: 15, right: 15, padding: 5, zIndex: 10 },
   nomeCli: { fontSize: 20, fontWeight: '900', paddingRight: 30 },
@@ -337,7 +362,7 @@ const styles = StyleSheet.create({
   saldoRow: { alignItems: 'center', marginBottom: 20 },
   saldoVal: { fontSize: 48, fontWeight: '900' },
   saldoLabel: { fontSize: 12, fontWeight: '800', letterSpacing: 1 },
-  
+
   faturaBox: { borderTopWidth: 1, paddingTop: 20 },
   faturaLabel: { fontSize: 11, fontWeight: '800', marginBottom: 10 },
   faturaInputRow: { flexDirection: 'row', gap: 10 },
@@ -348,23 +373,22 @@ const styles = StyleSheet.create({
   vouchersHeader: { flexDirection: 'row', gap: 20, marginBottom: 15 },
   tab: { paddingBottom: 5 },
   tabTxt: { fontSize: 16, fontWeight: '700' },
-
+  
   itemVoucher: { flexDirection: 'row', padding: 15, borderRadius: 15, marginBottom: 10, alignItems: 'center', borderWidth: 1 },
   vTitle: { fontSize: 15, fontWeight: '800' },
   vDesc: { fontSize: 12 },
   btnUsar: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   btnUsarTxt: { color: '#FFF', fontWeight: '900', fontSize: 11 },
-
+  
   itemHist: { flexDirection: 'row', padding: 15, borderRadius: 15, marginBottom: 10, alignItems: 'center' },
   histData: { fontSize: 12 },
   histNota: { fontSize: 14, fontWeight: '700' },
   histPts: { fontSize: 16, fontWeight: '900' },
-
+  
   empty: { marginTop: 80, alignItems: 'center', paddingHorizontal: 40 },
   emptyTxt: { textAlign: 'center', marginTop: 15, fontWeight: '600', lineHeight: 20 },
-
   vazio: { textAlign: 'center', marginTop: 15, fontWeight: '600', lineHeight: 20 },
-
+  
   cameraFull: { flex: 1, backgroundColor: '#000' },
   overlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   target: { width: 250, height: 250, borderWidth: 2, borderRadius: 20 },
