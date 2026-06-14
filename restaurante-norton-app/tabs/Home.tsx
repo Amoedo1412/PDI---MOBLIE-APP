@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { 
   View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, 
   Platform, Dimensions, Linking, StatusBar, Modal, TextInput, Alert, 
-  KeyboardAvoidingView, ActivityIndicator 
+  KeyboardAvoidingView, ActivityIndicator, FlatList 
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import EstadoRestaurante from '../components/EstadoRestaurante';
@@ -10,20 +10,27 @@ import NortonLoading from '../components/NortonLoading';
 import { Ionicons } from '@expo/vector-icons';
 import { useFonts } from 'expo-font';
 
-// TEMA GLOBAL
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants'; 
+
 import { useTheme } from '../components/TemaContexto'; 
 
 const { width } = Dimensions.get('window');
 const COR_NORTON = '#FF6B00';
-
 const imagemLocalizacao = require('../imgs/localizacao.png'); 
 const fallbackDefault = require('../imgs/prato_default.png');
 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function Home({ navigation }: any) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
 
-  // Estados
   const [nome, setNome] = useState('Cliente');
   const [pontos, setPontos] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -34,6 +41,13 @@ export default function Home({ navigation }: any) {
   const [textoCritica, setTextoCritica] = useState('');
   const [nota, setNota] = useState(0); 
   const [loadingCritica, setLoadingCritica] = useState(false);
+
+  const [notificacoes, setNotificacoes] = useState<any[]>([]);
+  const [naoLidas, setNaoLidas] = useState(0);
+  const [modalNotifVisible, setModalNotifVisible] = useState(false);
+
+  const [pedidoSelecionado, setPedidoSelecionado] = useState<any>(null);
+  const [modalPedidoVisible, setModalPedidoVisible] = useState(false);
 
   const [fontsLoaded] = useFonts({
     'Bauhaus93': require('../assets/fonts/Bauhaus93.ttf'),
@@ -53,14 +67,10 @@ export default function Home({ navigation }: any) {
     'domingo': 6
   };
 
-useEffect(() => {
+  useEffect(() => {
     carregarDadosIniciais();
-
-    let restauranteSubscription: any;
-    let perfilSubscription: any;
-    let ementaSubscription: any;
-    let criticaSubscription: any;
-    let pontosSubscription: any; // <-- Adicionado aqui para poder ser limpo no final!
+    let dadosChannel: any;
+    let notifsChannel: any; 
 
     async function setupSubscriptions() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -68,83 +78,95 @@ useEffect(() => {
       
       const currentUserId = user.id;
 
-      restauranteSubscription = supabase.channel('restaurante_home')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurante' }, (payload) => {
-          setRestauranteInfo(payload.new);
-        }).subscribe();
+      await registarTokenPush(currentUserId);
 
-      ementaSubscription = supabase.channel('ementas_home')
+      // CANAL 1: DADOS GERAIS DO RESTAURANTE
+      dadosChannel = supabase.channel(`home_dados_${currentUserId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurante' }, (payload: any) => {
+          setRestauranteInfo(payload.new);
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'ementas' }, () => {
           carregarEmentas();
-        }).subscribe();
-      
-      perfilSubscription = supabase
-        .channel(`perfil_home_${currentUserId}`)
-        .on('postgres_changes', { 
-          event: 'UPDATE', schema: 'public', table: 'perfis', filter: `id=eq.${currentUserId}` 
-        }, (payload) => {
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'perfis', filter: `id=eq.${currentUserId}` }, (payload: any) => {
           if (payload.new.nome) setNome(payload.new.nome.split(' ')[0]);
         })
-        .subscribe();
-
-      // 4. ESCUTA OS TEUS PONTOS (Nova Tabela) - Agora usa a variável de fora
-      pontosSubscription = supabase
-        .channel(`pontos_home_${currentUserId}`)
-        .on('postgres_changes', { 
-          event: 'UPDATE', schema: 'public', table: 'pontos', filter: `id_cliente=eq.${currentUserId}` 
-        }, (payload) => {
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pontos', filter: `id_cliente=eq.${currentUserId}` }, (payload: any) => {
           setPontos(payload.new.saldo || 0);
         })
-        .subscribe();
-
-      criticaSubscription = supabase.channel(`criticas_home_${currentUserId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'criticas' }, (payload) => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'criticas' }, (payload: any) => {
           if (payload.eventType === 'DELETE') {
             setMinhaCritica((current: any) => (current?.id === payload.old.id ? null : current));
           } else if (payload.new && payload.new.cliente_id === currentUserId) {
             setMinhaCritica(payload.new);
           }
-        }).subscribe();
+        })
+        .subscribe();
+
+      // CANAL 2: NOTIFICAÇÕES (À PROVA DE BALAS - Filtragem no lado do Javascript)
+      notifsChannel = supabase.channel(`home_notifs_seguro_${currentUserId}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificacoes' }, (payload: any) => {
+          // Filtramos apenas as notificações que pertencem a este utilizador
+          if (payload.new && payload.new.user_id === currentUserId) {
+            setNotificacoes((prev) => {
+              if (prev.some(n => n.id === payload.new.id)) return prev;
+              return [payload.new, ...prev];
+            });
+            setNaoLidas((prev) => prev + 1);
+          }
+        })
+        .subscribe();
     }
 
     setupSubscriptions();
     
     return () => {
-      // Limpeza correta de todas as subscrições para a app não ficar lenta
-      if (restauranteSubscription) supabase.removeChannel(restauranteSubscription);
-      if (perfilSubscription) supabase.removeChannel(perfilSubscription);
-      if (ementaSubscription) supabase.removeChannel(ementaSubscription);
-      if (criticaSubscription) supabase.removeChannel(criticaSubscription);
-      if (pontosSubscription) supabase.removeChannel(pontosSubscription); // <-- Limpeza ativada!
+      if (dadosChannel) supabase.removeChannel(dadosChannel);
+      if (notifsChannel) supabase.removeChannel(notifsChannel);
     };
   }, []);
+
+  async function registarTokenPush(uid: string) {
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      if (finalStatus !== 'granted') return;
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('default', {
+          name: 'default', importance: Notifications.AndroidImportance.MAX, vibrationPattern: [0, 250, 250, 250], lightColor: COR_NORTON,
+        });
+      }
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+      if (!projectId) return; 
+
+      const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
+      await supabase.from('push_tokens').upsert({ user_id: uid, token: tokenData.data }, { onConflict: 'token' });
+    } catch (error) { 
+      console.log('Erro Push:', error); 
+    }
+  }
 
   async function carregarEmentas() {
     try {
       const { data: ementasData, error: ementasError } = await supabase.from('ementas').select(`
-        id,
-        dia_semana,
-        pratos (
-          nome,
-          imagem_url,
-          preco
-        )
+        id, dia_semana, pratos (nome, imagem_url, preco)
       `);
       
       if (!ementasError && ementasData && ementasData.length > 0) {
         const hojeJS = new Date().getDay(); 
         const hojeIndex = hojeJS === 0 ? 6 : hojeJS - 1; 
-
         const pratosDeHoje = ementasData
           .filter(item => {
             const diaNome = (item.dia_semana || '').trim().toLowerCase();
             return mapeamentoDias[diaNome] === hojeIndex;
           })
-          .map((item: any) => {
-             return Array.isArray(item.pratos) ? item.pratos[0] : item.pratos;
-          })
+          .map((item: any) => Array.isArray(item.pratos) ? item.pratos[0] : item.pratos)
           .filter(p => p !== null && p !== undefined);
-
         setEmentas(pratosDeHoje);
       } else {
         setEmentas([]);
@@ -159,21 +181,20 @@ useEffect(() => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Vai buscar apenas o Nome à tabela Perfis
         const { data: pData } = await supabase.from('perfis').select('nome').eq('id', user.id).maybeSingle();
-        if (pData) {
-          setNome(pData.nome ? pData.nome.split(' ')[0] : 'Cliente');
-        }
+        if (pData) setNome(pData.nome ? pData.nome.split(' ')[0] : 'Cliente');
 
-        // Vai buscar o Saldo à nova tabela Pontos
         const { data: ptsData } = await supabase.from('pontos').select('saldo').eq('id_cliente', user.id).maybeSingle();
-        if (ptsData) {
-          setPontos(ptsData.saldo || 0);
-        }
+        if (ptsData) setPontos(ptsData.saldo || 0);
 
-        // Vai buscar a Crítica
         const { data: criticaData } = await supabase.from('criticas').select('*').eq('cliente_id', user.id).maybeSingle();
         if (criticaData) setMinhaCritica(criticaData);
+
+        const { data: notifsData } = await supabase.from('notificacoes').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
+        if (notifsData) {
+          setNotificacoes(notifsData);
+          setNaoLidas(notifsData.filter(n => !n.lida).length);
+        }
       }
       const { data: rest } = await supabase.from('restaurante').select('*').eq('id', 1).maybeSingle();
       if (rest) setRestauranteInfo(rest);
@@ -184,7 +205,45 @@ useEffect(() => {
     }
   }
 
-// --- LÓGICA DE STATUS OTIMIZADA ---
+  async function abrirSino() {
+    setModalNotifVisible(true);
+    if (naoLidas > 0) {
+      setNaoLidas(0);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) await supabase.from('notificacoes').update({ lida: true }).eq('user_id', user.id).eq('lida', false);
+      setNotificacoes(prev => prev.map(n => ({ ...n, lida: true })));
+    }
+  }
+
+  async function apagarNotificacao(id: string) {
+    setNotificacoes(prev => prev.filter(n => n.id !== id));
+    await supabase.from('notificacoes').delete().eq('id', id);
+  }
+
+  const handleNotificacaoPress = async (item: any) => {
+    setModalNotifVisible(false); 
+    
+    if (item.tipo === 'newsletter_ementa') {
+      navigation.navigate('MenuScreens'); 
+    } 
+    else if (item.tipo === 'pedido_status') {
+      if (item.data && item.data.pedido_id) {
+        const { data } = await supabase.from('pedidos').select('*').eq('id', item.data.pedido_id).single();
+        if (data) {
+          setPedidoSelecionado(data);
+          setModalPedidoVisible(true); 
+        } else {
+          Alert.alert('Aviso', 'Este pedido já não se encontra disponível.');
+        }
+      } else {
+        navigation.navigate('HistoricoPedidos');
+      }
+    } 
+    else if (item.tipo === 'pontos_vouchers') {
+      navigation.navigate('Pontos'); 
+    }
+  };
+
   let tipoCartao = "ABERTO"; 
   let statusTexto = "A carregar...";
   let horarioVisual = "--:--";
@@ -194,19 +253,16 @@ useEffect(() => {
     const diaKey = diasMap[new Date().getDay()];
     const infoDia = restauranteInfo.horario_json?.[diaKey];
 
-    // 1. Férias (agora usa apenas is_ferias)
     if (restauranteInfo.is_ferias) {
       tipoCartao = "FERIAS";
       statusTexto = "Estamos de Férias!";
       horarioVisual = restauranteInfo.ferias_fim ? `Regressamos a ${restauranteInfo.ferias_fim}` : "Voltamos em breve!";
     } 
-    // 2. Encerrado (gerido 100% pelo JSON, quer seja dia de folga ou fecho pontual)
     else if (!infoDia || !infoDia.aberto) {
       tipoCartao = "ENCERRADO";
       statusTexto = "Hoje estamos encerrados";
       horarioVisual = "Voltamos brevemente!";
     } 
-    // 3. Aberto (lê as horas apenas do JSON)
     else {
       tipoCartao = "ABERTO";
       statusTexto = "Hoje estamos abertos";
@@ -269,272 +325,364 @@ useEffect(() => {
   if (loading || !fontsLoaded) return <NortonLoading />;
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: theme.bg }]} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor={theme.orange} />
-
-      {/* CABEÇALHO */}
-      <View style={[styles.headerLaranja, { backgroundColor: theme.orange }]}>
-        <View style={styles.topRow}>
-          <Text style={styles.brand}>Restaurante <Text style={{ color: theme.text }}>NortoN</Text></Text>
-        </View>
-
-        <View style={styles.saudacaoContainer}>
-          <Text style={styles.olaTexto}>{nome}, tens {pontos} pontos!</Text>
-          <Text style={styles.subSaudacao}>Ganha pontos ao fazer refeições.</Text>
-          <Text style={styles.subSaudacao}>1€ gasto = 1 ponto.</Text>
-        </View>
-      </View>
-
-      <View style={styles.body}>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <ScrollView style={[styles.container, { backgroundColor: theme.bg }]} showsVerticalScrollIndicator={false}>
+        <StatusBar barStyle="light-content" backgroundColor={theme.orange} />
         
-        {/* CARD DINÂMICO DE INFORMAÇÃO / DISPONIBILIDADE */}
-        <View style={[styles.cardInfoPrincipal, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          {tipoCartao === "ABERTO" && (
-            <View>
-              <EstadoRestaurante dados={undefined} /> 
-              <View style={[styles.divisor, { backgroundColor: theme.border }]} />
-              <View style={styles.horarioContainer}>
-                <View style={styles.horarioIconRow}>
-                  <View style={[styles.iconBg, { backgroundColor: 'rgba(0, 170, 108, 0.1)' }]}>
-                    <Ionicons name="time" size={20} color="#00aa6c" />
-                  </View>
-                  <View style={styles.horarioTextos}>
-                    <Text style={[styles.horarioLabel, { color: "#00aa6c" }]}>{statusTexto}</Text>
-                    <Text style={[styles.horarioValor, { color: theme.text }]}>{horarioVisual}</Text>
-                  </View>
+        <View style={[styles.headerLaranja, { backgroundColor: theme.orange }]}>
+          <View style={styles.topRow}>
+            <Text style={styles.brand}>Restaurante <Text style={{ color: theme.text }}>NortoN</Text></Text>
+            
+            <TouchableOpacity onPress={abrirSino} style={styles.btnSino}>
+              <Ionicons name="notifications" size={26} color="#FFF" />
+              {naoLidas > 0 && (
+                <View style={styles.badgeNotif}>
+                  <Text style={styles.badgeNotifTxt}>{naoLidas > 9 ? '9+' : naoLidas}</Text>
                 </View>
-              </View>
-            </View>
-          )}
-
-          {tipoCartao === "ENCERRADO" && (
-            <View style={styles.cardStatusSimples}>
-              <View style={[styles.iconBgGrande, { backgroundColor: 'rgba(219, 68, 55, 0.1)' }]}>
-                <Ionicons name="lock-closed" size={32} color="#DB4437" />
-              </View>
-              <Text style={[styles.statusTituloGrande, { color: theme.text }]}>{statusTexto}</Text>
-              <Text style={[styles.statusSubtituloGrande, { color: theme.textSec }]}>{horarioVisual}</Text>
-            </View>
-          )}
-
-          {tipoCartao === "FERIAS" && (
-            <View style={styles.cardStatusSimples}>
-              <View style={[styles.iconBgGrande, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
-                <Ionicons name="airplane" size={32} color={COR_NORTON} />
-              </View>
-              <Text style={[styles.statusTituloGrande, { color: theme.text }]}>{statusTexto}</Text>
-              <Text style={[styles.statusSubtituloGrande, { color: theme.textSec }]}>{horarioVisual}</Text>
-              <View style={styles.badgeFerias}>
-                <Text style={styles.badgeFeriasTexto}>A carregar baterias!</Text>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* EMENTA DINÂMICA / SEMANAL */}
-        {tipoCartao !== "FERIAS" && (
-          <View style={styles.seccao}>
-            <View style={styles.seccaoHeader}>
-              <Text style={[styles.tituloSecao, { color: theme.text, marginBottom: 0 }]}>
-                {tipoCartao === "ABERTO" && ementas.length > 0 ? "Pratos de Hoje" : "Ementa Semanal"}
-              </Text>
-              <TouchableOpacity onPress={() => navigation.navigate('MenuScreens')} style={styles.verTudoBtn}>
-                <Text style={[styles.verTudoTxt, { color: theme.orange }]}>Ver tudo</Text>
-                <Ionicons name="chevron-forward" size={18} color={theme.orange} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false} 
-              contentContainerStyle={styles.carrosselContainer} 
-              snapToInterval={width * 0.75 + 20} 
-              decelerationRate="fast"
-            >
-              {tipoCartao === "ABERTO" && ementas.length > 0 ? (
-                // Se estiver ABERTO, mostra o carrossel normal com os pratos do dia
-                ementas.map((prato, index) => {
-                  const sourceEmenta = prato.imagem_url ? { uri: prato.imagem_url } : fallbackDefault;
-
-                  return (
-                    <TouchableOpacity key={index} style={[styles.cardEmenta, { backgroundColor: theme.card }]} onPress={() => navigation.navigate('MenuScreens')}>
-                      <Image source={sourceEmenta} style={styles.imagemEmenta} />
-                      <View style={styles.overlayEmenta}>
-                        <View style={[styles.diaBadge, { backgroundColor: COR_NORTON }]}>
-                          <Text style={styles.diaEmenta}>
-                            {prato.preco ? `${Number(prato.preco).toFixed(2)}€` : 'HOJE'}
-                          </Text>
-                        </View>
-                        <Text style={styles.pratoEmenta} numberOfLines={2}>
-                          {prato.nome || 'Prato Norton'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              ) : (
-                // Se estiver FECHADO (e não de férias), mostra apenas o cartão genérico da Ementa
-                <TouchableOpacity style={[styles.cardEmenta, { backgroundColor: theme.card, width: width * 0.85 }]} onPress={() => navigation.navigate('MenuScreens')}>
-                  <Image source={fallbackDefault} style={styles.imagemEmenta} />
-                  <View style={styles.overlayEmenta}>
-                    <View style={[styles.diaBadge, { backgroundColor: COR_NORTON }]}>
-                      <Text style={styles.diaEmenta}>SEMANA</Text>
-                    </View>
-                    <Text style={styles.pratoEmenta} numberOfLines={2}>
-                      Consulta aqui os pratos da semana
-                    </Text>
-                  </View>
-                </TouchableOpacity>
               )}
-            </ScrollView>
+            </TouchableOpacity>
           </View>
-        )}
-        
-        {/* CRÍTICAS */}
-        <View style={styles.seccao}>
-          <Text style={[styles.tituloSecao, { color: theme.text }]}>A tua Opinião</Text>
-          <View style={[styles.cardCritica, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            {minhaCritica ? (
+          
+          <View style={styles.saudacaoContainer}>
+            <Text style={styles.olaTexto}>{nome}, tens {pontos} pontos!</Text>
+            <Text style={styles.subSaudacao}>Ganha pontos ao fazer refeições.</Text>
+            <Text style={styles.subSaudacao}>1€ gasto = 1 ponto.</Text>
+          </View>
+        </View>
+
+        <View style={styles.body}>
+          
+          <View style={[styles.cardInfoPrincipal, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            {tipoCartao === "ABERTO" && (
               <View>
-                <View style={styles.criticaAgradecimento}>
-                  <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
-                    <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-                    <Text style={[styles.criticaAgradecimentoTxt, { color: theme.text }]}>A tua avaliação</Text>
+                <EstadoRestaurante dados={undefined} /> 
+                <View style={[styles.divisor, { backgroundColor: theme.border }]} />
+                <View style={styles.horarioContainer}>
+                  <View style={styles.horarioIconRow}>
+                    <View style={[styles.iconBg, { backgroundColor: 'rgba(0, 170, 108, 0.1)' }]}>
+                      <Ionicons name="time" size={20} color="#00aa6c" />
+                    </View>
+                    <View style={styles.horarioTextos}>
+                      <Text style={[styles.horarioLabel, { color: "#00aa6c" }]}>{statusTexto}</Text>
+                      <Text style={[styles.horarioValor, { color: theme.text }]}>{horarioVisual}</Text>
+                    </View>
                   </View>
-                  <TouchableOpacity onPress={apagarCritica} style={{ padding: 5 }}>
-                    <Ionicons name="trash-outline" size={22} color="#DB4437" />
-                  </TouchableOpacity>
                 </View>
-                
-                <View style={styles.estrelasLidas}>
-                  {[1, 2, 3, 4, 5].map((star) => (
-                    <Ionicons key={star} name={minhaCritica.nota >= star ? "star" : "star-outline"} size={16} color={COR_NORTON} style={{ marginRight: 2 }} />
-                  ))}
-                </View>
-                <Text style={[styles.criticaFeita, { color: theme.textSec }]}>"{minhaCritica.comentario}"</Text>
-              </View>
-            ) : (
-              <View style={styles.criticaVazia}>
-                <Text style={[styles.criticaVaziaTxt, { color: theme.textSec }]}>Ainda não avaliaste a tua experiência connosco.</Text>
-                <TouchableOpacity style={styles.botaoCritica} onPress={() => setModalCriticaVisible(true)}>
-                  <Ionicons name="star" size={16} color="#fff" />
-                  <Text style={styles.textoBotaoCritica}>Deixar Crítica na App</Text>
-                </TouchableOpacity>
               </View>
             )}
-
-            <View style={styles.divisorExterno} />
-            <Text style={[styles.txtPlataformas, { color: theme.textSec }]}>Avalia-nos também nas plataformas:</Text>
-            <View style={styles.plataformasContainer}>
-              <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={avaliarGoogle}>
-                <View style={[styles.iconCirculo, { backgroundColor: 'rgba(219, 68, 55, 0.1)' }]}>
-                  <Ionicons name="logo-google" size={22} color="#DB4437" />
+            {tipoCartao === "ENCERRADO" && (
+              <View style={styles.cardStatusSimples}>
+                <View style={[styles.iconBgGrande, { backgroundColor: 'rgba(219, 68, 55, 0.1)' }]}>
+                  <Ionicons name="lock-closed" size={32} color="#DB4437" />
                 </View>
-                <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Google</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={avaliarTripAdvisor}>
-                <View style={[styles.iconCirculo, { backgroundColor: 'rgba(0, 170, 108, 0.1)' }]}>
-                  <Ionicons name="earth" size={22} color="#00aa6c" />
+                <Text style={[styles.statusTituloGrande, { color: theme.text }]}>{statusTexto}</Text>
+                <Text style={[styles.statusSubtituloGrande, { color: theme.textSec }]}>{horarioVisual}</Text>
+              </View>
+            )}
+            {tipoCartao === "FERIAS" && (
+              <View style={styles.cardStatusSimples}>
+                <View style={[styles.iconBgGrande, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
+                  <Ionicons name="airplane" size={32} color={COR_NORTON} />
                 </View>
-                <Text style={[styles.txtContactoBtn, { color: theme.text }]}>TripAdvisor</Text>
-              </TouchableOpacity>
+                <Text style={[styles.statusTituloGrande, { color: theme.text }]}>{statusTexto}</Text>
+                <Text style={[styles.statusSubtituloGrande, { color: theme.textSec }]}>{horarioVisual}</Text>
+                <View style={styles.badgeFerias}>
+                  <Text style={styles.badgeFeriasTexto}>A carregar baterias!</Text>
+                </View>
+              </View>
+            )}
+          </View>
+
+          {tipoCartao !== "FERIAS" && (
+            <View style={styles.seccao}>
+              <View style={styles.seccaoHeader}>
+                <Text style={[styles.tituloSecao, { color: theme.text, marginBottom: 0 }]}>
+                  {tipoCartao === "ABERTO" && ementas.length > 0 ? "Pratos de Hoje" : "Ementa Semanal"}
+                </Text>
+                <TouchableOpacity onPress={() => navigation.navigate('MenuScreens')} style={styles.verTudoBtn}>
+                  <Text style={[styles.verTudoTxt, { color: theme.orange }]}>Ver tudo</Text>
+                  <Ionicons name="chevron-forward" size={18} color={theme.orange} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView 
+                horizontal 
+                showsHorizontalScrollIndicator={false} 
+                contentContainerStyle={styles.carrosselContainer} 
+                snapToInterval={width * 0.75 + 20} 
+                decelerationRate="fast"
+              >
+                {tipoCartao === "ABERTO" && ementas.length > 0 ? (
+                  ementas.map((prato, index) => {
+                    const sourceEmenta = prato.imagem_url ? { uri: prato.imagem_url } : fallbackDefault;
+                    return (
+                      <TouchableOpacity key={index} style={[styles.cardEmenta, { backgroundColor: theme.card }]} onPress={() => navigation.navigate('MenuScreens')}>
+                        <Image source={sourceEmenta} style={styles.imagemEmenta} />
+                        <View style={styles.overlayEmenta}>
+                          <View style={[styles.diaBadge, { backgroundColor: COR_NORTON }]}>
+                            <Text style={styles.diaEmenta}>
+                              {prato.preco ? `${Number(prato.preco).toFixed(2)}€` : 'HOJE'}
+                            </Text>
+                          </View>
+                          <Text style={styles.pratoEmenta} numberOfLines={2}>
+                            {prato.nome || 'Prato Norton'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  <TouchableOpacity style={[styles.cardEmenta, { backgroundColor: theme.card, width: width * 0.85 }]} onPress={() => navigation.navigate('MenuScreens')}>
+                    <Image source={fallbackDefault} style={styles.imagemEmenta} />
+                    <View style={styles.overlayEmenta}>
+                      <View style={[styles.diaBadge, { backgroundColor: COR_NORTON }]}>
+                        <Text style={styles.diaEmenta}>SEMANA</Text>
+                      </View>
+                      <Text style={styles.pratoEmenta} numberOfLines={2}>
+                        Consulta aqui os pratos da semana
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </View>
+          )}
+          
+          <View style={styles.seccao}>
+            <Text style={[styles.tituloSecao, { color: theme.text }]}>A tua Opinião</Text>
+            <View style={[styles.cardCritica, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              {minhaCritica ? (
+                <View>
+                  <View style={styles.criticaAgradecimento}>
+                    <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+                      <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                      <Text style={[styles.criticaAgradecimentoTxt, { color: theme.text }]}>A tua avaliação</Text>
+                    </View>
+                    <TouchableOpacity onPress={apagarCritica} style={{ padding: 5 }}>
+                      <Ionicons name="trash-outline" size={22} color="#DB4437" />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <View style={styles.estrelasLidas}>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Ionicons key={star} name={minhaCritica.nota >= star ? "star" : "star-outline"} size={16} color={COR_NORTON} style={{ marginRight: 2 }} />
+                    ))}
+                  </View>
+                  <Text style={[styles.criticaFeita, { color: theme.textSec }]}>"{minhaCritica.comentario}"</Text>
+                </View>
+              ) : (
+                <View style={styles.criticaVazia}>
+                  <Text style={[styles.criticaVaziaTxt, { color: theme.textSec }]}>Ainda não avaliaste a tua experiência connosco.</Text>
+                  <TouchableOpacity style={styles.botaoCritica} onPress={() => setModalCriticaVisible(true)}>
+                    <Ionicons name="star" size={16} color="#fff" />
+                    <Text style={styles.textoBotaoCritica}>Deixar Crítica na App</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              <View style={styles.divisorExterno} />
+              <Text style={[styles.txtPlataformas, { color: theme.textSec }]}>Avalia-nos também nas plataformas:</Text>
+              <View style={styles.plataformasContainer}>
+                <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={avaliarGoogle}>
+                  <View style={[styles.iconCirculo, { backgroundColor: 'rgba(219, 68, 55, 0.1)' }]}>
+                    <Ionicons name="logo-google" size={22} color="#DB4437" />
+                  </View>
+                  <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Google</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={avaliarTripAdvisor}>
+                  <View style={[styles.iconCirculo, { backgroundColor: 'rgba(0, 170, 108, 0.1)' }]}>
+                    <Ionicons name="earth" size={22} color="#00aa6c" />
+                  </View>
+                  <Text style={[styles.txtContactoBtn, { color: theme.text }]}>TripAdvisor</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
+
+          <View style={styles.seccao}>
+            <Text style={[styles.tituloSecao, { color: theme.text }]}>Contactos & Localização</Text>
+            <View style={styles.contactosContainer}>
+              <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={ligarRestaurante}>
+                <View style={[styles.iconCirculo, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
+                  <Ionicons name="call" size={22} color={COR_NORTON} />
+                </View>
+                <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Chamada</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={enviarEmail}>
+                <View style={[styles.iconCirculo, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
+                  <Ionicons name="mail" size={22} color={COR_NORTON} />
+                </View>
+                <Text style={[styles.txtContactoBtn, { color: theme.text }]}>E-mail</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={abrirFacebook}>
+                <View style={[styles.iconCirculo, { backgroundColor: 'rgba(24, 119, 242, 0.1)' }]}>
+                  <Ionicons name="logo-facebook" size={22} color="#1877F2" />
+                </View>
+                <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Facebook</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.cardTakeAway, { backgroundColor: theme.card, borderColor: theme.border, marginTop: 10 }]}>
+              <Image source={imagemLocalizacao} style={styles.mapPlaceholder} resizeMode="cover" />
+              <View style={styles.infoTakeAway}>
+                <View style={styles.moradaRow}>
+                  <Ionicons name="location-outline" size={18} color={COR_NORTON} />
+                  <Text style={[styles.moradaTxt, { color: theme.textSec }]}>Rua de Moçambique 281, Coimbra</Text>
+                </View>
+                <TouchableOpacity style={[styles.botaoPedido, { backgroundColor: isDark ? '#333' : '#121212' }]} onPress={abrirMapa}>
+                  <Text style={styles.textoPedido}>Como Chegar ao Norton</Text>
+                  <Ionicons name="navigate" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+          <View style={{ height: 100 }} />
         </View>
 
-        {/* CONTACTOS & LOCALIZAÇÃO */}
-        <View style={styles.seccao}>
-          <Text style={[styles.tituloSecao, { color: theme.text }]}>Contactos & Localização</Text>
-          
-          <View style={styles.contactosContainer}>
-            <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={ligarRestaurante}>
-              <View style={[styles.iconCirculo, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
-                <Ionicons name="call" size={22} color={COR_NORTON} />
+        <Modal visible={modalCriticaVisible} animationType="slide" transparent={true}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.bg }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.text }]}>A tua Crítica</Text>
+                <TouchableOpacity onPress={() => setModalCriticaVisible(false)}>
+                  <Ionicons name="close" size={26} color={theme.textSec} />
+                </TouchableOpacity>
               </View>
-              <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Chamada</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={enviarEmail}>
-              <View style={[styles.iconCirculo, { backgroundColor: 'rgba(255, 107, 0, 0.1)' }]}>
-                <Ionicons name="mail" size={22} color={COR_NORTON} />
+              <Text style={[styles.modalDescricao, { color: theme.textSec }]}>
+                Classifica a tua experiência de 1 a 5 estrelas:
+              </Text>
+              <View style={styles.seletorEstrelas}>
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <TouchableOpacity key={star} onPress={() => setNota(star)} style={{ padding: 5 }}>
+                    <Ionicons 
+                      name={nota >= star ? "star" : "star-outline"} 
+                      size={36} 
+                      color={COR_NORTON} 
+                    />
+                  </TouchableOpacity>
+                ))}
               </View>
-              <Text style={[styles.txtContactoBtn, { color: theme.text }]}>E-mail</Text>
-            </TouchableOpacity>
+              <TextInput 
+                style={[styles.inputCritica, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+                placeholder="Escreve aqui a tua experiência..."
+                placeholderTextColor={theme.textSec}
+                multiline
+                numberOfLines={4}
+                value={textoCritica}
+                onChangeText={setTextoCritica}
+                textAlignVertical="top"
+              />
+              <TouchableOpacity style={styles.btnEnviarCritica} onPress={submeterCritica} disabled={loadingCritica}>
+                {loadingCritica ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnRecuperarTexto}>Submeter Avaliação</Text>}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
-            <TouchableOpacity style={[styles.btnContactoRedondo, { backgroundColor: theme.card, borderColor: theme.border }]} onPress={abrirFacebook}>
-              <View style={[styles.iconCirculo, { backgroundColor: 'rgba(24, 119, 242, 0.1)' }]}>
-                <Ionicons name="logo-facebook" size={22} color="#1877F2" />
-              </View>
-              <Text style={[styles.txtContactoBtn, { color: theme.text }]}>Facebook</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.cardTakeAway, { backgroundColor: theme.card, borderColor: theme.border, marginTop: 10 }]}>
-            <Image source={imagemLocalizacao} style={styles.mapPlaceholder} resizeMode="cover" />
-            <View style={styles.infoTakeAway}>
-              <View style={styles.moradaRow}>
-                <Ionicons name="location-outline" size={18} color={COR_NORTON} />
-                <Text style={[styles.moradaTxt, { color: theme.textSec }]}>Rua de Moçambique 281, Coimbra</Text>
+        <Modal visible={modalPedidoVisible} animationType="slide" transparent={true}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Detalhes do Pedido</Text>
+                <TouchableOpacity onPress={() => setModalPedidoVisible(false)}><Ionicons name="close" size={26} color={theme.textSec} /></TouchableOpacity>
               </View>
               
-              <TouchableOpacity style={[styles.botaoPedido, { backgroundColor: theme.isDark ? '#333' : '#121212' }]} onPress={abrirMapa}>
-                <Text style={styles.textoPedido}>Como Chegar ao Norton</Text>
-                <Ionicons name="navigate" size={20} color="#fff" />
-              </TouchableOpacity>
+              {pedidoSelecionado && (
+                <View style={{ marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 }}>
+                    <Text style={{ color: theme.textSec, fontWeight: 'bold' }}>ESTADO:</Text>
+                    <Text style={{ color: theme.orange, fontWeight: '900', textTransform: 'uppercase' }}>{pedidoSelecionado.status}</Text>
+                  </View>
+                  <View style={{ backgroundColor: theme.bg, padding: 15, borderRadius: 15, marginBottom: 15 }}>
+                    <Text style={{ color: theme.text, fontSize: 16, lineHeight: 24 }}>{pedidoSelecionado.prato_nome}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 15 }}>
+                    <View>
+                      <Text style={{ color: theme.textSec, fontSize: 12, fontWeight: 'bold' }}>RECOLHA:</Text>
+                      <Text style={{ color: theme.text, fontSize: 18, fontWeight: '900' }}>{pedidoSelecionado.hora_recolha}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ color: theme.textSec, fontSize: 12, fontWeight: 'bold' }}>TOTAL:</Text>
+                      <Text style={{ color: theme.text, fontSize: 18, fontWeight: '900' }}>{Number(pedidoSelecionado.total_preco).toFixed(2)}€</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
             </View>
           </View>
-        </View>
+        </Modal>
 
-        <View style={{ height: 100 }} />
-      </View>
+      </ScrollView>
 
-      {/* MODAL PARA NOVA CRÍTICA */}
-      <Modal visible={modalCriticaVisible} animationType="slide" transparent={true}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.bg }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.text }]}>A tua Crítica</Text>
-              <TouchableOpacity onPress={() => setModalCriticaVisible(false)}>
-                <Ionicons name="close" size={26} color={theme.textSec} />
-              </TouchableOpacity>
-            </View>
-            
-            <Text style={[styles.modalDescricao, { color: theme.textSec }]}>
-              Classifica a tua experiência de 1 a 5 estrelas:
-            </Text>
-
-            <View style={styles.seletorEstrelas}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <TouchableOpacity key={star} onPress={() => setNota(star)} style={{ padding: 5 }}>
-                  <Ionicons 
-                    name={nota >= star ? "star" : "star-outline"} 
-                    size={36} 
-                    color={COR_NORTON} 
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TextInput 
-              style={[styles.inputCritica, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
-              placeholder="Escreve aqui a tua experiência..."
-              placeholderTextColor={theme.textSec}
-              multiline
-              numberOfLines={4}
-              value={textoCritica}
-              onChangeText={setTextoCritica}
-              textAlignVertical="top"
-            />
-
-            <TouchableOpacity style={styles.btnEnviarCritica} onPress={submeterCritica} disabled={loadingCritica}>
-              {loadingCritica ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnRecuperarTexto}>Submeter Avaliação</Text>}
+      {/* SINO DAS NOTIFICAÇÕES (COM SWIPE PARA APAGAR) */}
+      <Modal visible={modalNotifVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalNotifVisible(false)}>
+        <View style={[styles.modalContainerFull, { backgroundColor: theme.bg }]}>
+          <View style={[styles.modalHeaderFull, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+            <Text style={[styles.modalTituloFull, { color: theme.text }]}>Notificações</Text>
+            <TouchableOpacity onPress={() => setModalNotifVisible(false)} style={{ padding: 5 }}>
+              <Text style={{color: COR_NORTON, fontWeight: 'bold', fontSize: 16}}>Fechar</Text>
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+
+          <FlatList
+            data={notificacoes}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ padding: 20 }}
+            ListEmptyComponent={
+              <View style={{ alignItems: 'center', marginTop: 50 }}>
+                <Ionicons name="notifications-off-outline" size={60} color={theme.border} />
+                <Text style={{ color: theme.subText, marginTop: 15, fontWeight: '600' }}>Sem notificações de momento.</Text>
+              </View>
+            }
+            renderItem={({ item }) => {
+              let iconeName = "mail-open"; let iconeColor = COR_NORTON; let bgIconColor = 'rgba(255, 107, 0, 0.1)';
+              if (item.tipo === 'pedido_status') { iconeName = "fast-food"; iconeColor = '#007AFF'; bgIconColor = 'rgba(0, 122, 255, 0.1)'; }
+              else if (item.tipo === 'pontos_vouchers') { iconeName = "star"; iconeColor = '#34C759'; bgIconColor = 'rgba(52, 199, 89, 0.1)'; }
+
+              return (
+                <View style={[styles.swipeContainer, { borderColor: theme.border }]}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    bounces={false}
+                    snapToOffsets={[0, 80]}
+                    decelerationRate="fast"
+                  >
+                    {/* CARTÃO DA NOTIFICAÇÃO (CLICÁVEL) */}
+                    <TouchableOpacity 
+                      style={[styles.cardNotifSwipe, { width: width - 40, backgroundColor: theme.card }]}
+                      onPress={() => handleNotificacaoPress(item)}
+                      activeOpacity={0.9}
+                    >
+                      <View style={[styles.iconNotifBox, { backgroundColor: bgIconColor }]}>
+                        <Ionicons name={iconeName as any} size={22} color={iconeColor} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.tituloNotif, { color: theme.text }]}>{item.titulo}</Text>
+                        <Text style={[styles.corpoNotif, { color: theme.textSec }]}>{item.corpo}</Text>
+                        <Text style={[styles.dataNotif, { color: theme.subText }]}>{new Date(item.created_at).toLocaleDateString()} às {new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</Text>
+                      </View>
+                      
+                      <View style={{ alignItems: 'center', opacity: 0.3 }}>
+                        <Ionicons name="chevron-back" size={14} color={theme.textSec} style={{marginBottom: 5}} />
+                        <Ionicons name="trash-outline" size={16} color={'#FF3B30'} />
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* BOTÃO ESCONDIDO (APARECE QUANDO DESLIZAS PARA A ESQUERDA) */}
+                    <TouchableOpacity 
+                      style={styles.btnTrashSwipe}
+                      onPress={() => apagarNotificacao(item.id)}
+                    >
+                      <Ionicons name="trash" size={28} color="#FFF" />
+                    </TouchableOpacity>
+
+                  </ScrollView>
+                </View>
+              );
+            }}
+          />
+        </View>
       </Modal>
 
-    </ScrollView>
+    </View>
   );
 }
 
@@ -547,6 +695,24 @@ const styles = StyleSheet.create({
   olaTexto: { fontSize: 26, fontWeight: '900', color: '#FFFFFF', letterSpacing: -0.5 },
   subSaudacao: { fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4, fontWeight: '500' },
   
+  btnSino: { position: 'relative', padding: 5 },
+  badgeNotif: { position: 'absolute', top: 0, right: 0, backgroundColor: '#FF3B30', minWidth: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center', borderWidth: 1.5, borderColor: COR_NORTON },
+  badgeNotifTxt: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
+
+  modalContainerFull: { flex: 1 },
+  modalHeaderFull: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: Platform.OS === 'ios' ? 20 : 30, paddingBottom: 15, borderBottomWidth: 1 },
+  modalTituloFull: { fontSize: 20, fontWeight: '900' },
+  
+  // ESTILOS SWIPE-TO-DELETE
+  swipeContainer: { marginBottom: 12, borderRadius: 15, overflow: 'hidden', borderWidth: 1, backgroundColor: '#FF3B30' },
+  cardNotifSwipe: { flexDirection: 'row', padding: 15, alignItems: 'center' },
+  btnTrashSwipe: { width: 80, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FF3B30' },
+
+  iconNotifBox: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
+  tituloNotif: { fontSize: 15, fontWeight: 'bold', marginBottom: 4 },
+  corpoNotif: { fontSize: 13, lineHeight: 18, marginBottom: 6 },
+  dataNotif: { fontSize: 11, fontStyle: 'italic' },
+
   body: { marginTop: -40, paddingHorizontal: 20 },
   
   cardInfoPrincipal: { borderRadius: 30, paddingVertical: 20, paddingHorizontal: 20, elevation: 8, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 15, borderWidth: 1 },
@@ -564,7 +730,6 @@ const styles = StyleSheet.create({
   statusSubtituloGrande: { fontSize: 15, fontWeight: '500' },
   badgeFerias: { marginTop: 15, backgroundColor: COR_NORTON, paddingHorizontal: 15, paddingVertical: 6, borderRadius: 20 },
   badgeFeriasTexto: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-
   seccao: { marginTop: 35 },
   seccaoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15, paddingHorizontal: 5 },
   tituloSecao: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5, marginBottom: 15, paddingHorizontal: 5 },
@@ -578,7 +743,6 @@ const styles = StyleSheet.create({
   diaBadge: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10, marginBottom: 8 },
   diaEmenta: { color: '#fff', fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   pratoEmenta: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-
   cardCritica: { borderRadius: 25, padding: 20, borderWidth: 1, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
   criticaVazia: { alignItems: 'center', paddingVertical: 10 },
   criticaVaziaTxt: { fontSize: 14, textAlign: 'center', marginBottom: 15 },
@@ -588,16 +752,13 @@ const styles = StyleSheet.create({
   criticaAgradecimentoTxt: { fontWeight: 'bold', fontSize: 16, marginLeft: 8 },
   estrelasLidas: { flexDirection: 'row', marginBottom: 10, paddingLeft: 32 }, 
   criticaFeita: { fontSize: 15, fontStyle: 'italic', lineHeight: 22 },
-
   divisorExterno: { height: 1, backgroundColor: '#eee', marginVertical: 20 },
   txtPlataformas: { fontSize: 13, textAlign: 'center', marginBottom: 15, fontWeight: '600' },
   plataformasContainer: { flexDirection: 'row', justifyContent: 'center', gap: 15 },
-
   contactosContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, paddingHorizontal: 5 },
   btnContactoRedondo: { flex: 1, alignItems: 'center', paddingVertical: 15, borderRadius: 25, borderWidth: 1, marginHorizontal: 5, elevation: 2, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 5 },
   iconCirculo: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   txtContactoBtn: { fontSize: 12, fontWeight: '700' },
-
   cardTakeAway: { borderRadius: 30, overflow: 'hidden', elevation: 2, borderWidth: 1, marginTop: 10 },
   mapPlaceholder: { width: '100%', height: 160 },
   infoTakeAway: { padding: 20 },
@@ -605,7 +766,6 @@ const styles = StyleSheet.create({
   moradaTxt: { fontSize: 14, fontWeight: '500' },
   botaoPedido: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 22, gap: 10 },
   textoPedido: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '90%', borderRadius: 25, padding: 25, elevation: 10 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
