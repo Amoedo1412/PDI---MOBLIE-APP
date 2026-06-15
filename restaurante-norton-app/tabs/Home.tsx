@@ -80,7 +80,6 @@ export default function Home({ navigation }: any) {
 
       await registarTokenPush(currentUserId);
 
-      // CANAL 1: DADOS GERAIS DO RESTAURANTE
       dadosChannel = supabase.channel(`home_dados_${currentUserId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurante' }, (payload: any) => {
           setRestauranteInfo(payload.new);
@@ -103,10 +102,8 @@ export default function Home({ navigation }: any) {
         })
         .subscribe();
 
-      // CANAL 2: NOTIFICAÇÕES (À PROVA DE BALAS - Filtragem no lado do Javascript)
       notifsChannel = supabase.channel(`home_notifs_seguro_${currentUserId}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notificacoes' }, (payload: any) => {
-          // Filtramos apenas as notificações que pertencem a este utilizador
           if (payload.new && payload.new.user_id === currentUserId) {
             setNotificacoes((prev) => {
               if (prev.some(n => n.id === payload.new.id)) return prev;
@@ -611,7 +608,6 @@ export default function Home({ navigation }: any) {
 
       </ScrollView>
 
-      {/* SINO DAS NOTIFICAÇÕES (COM SWIPE PARA APAGAR) */}
       <Modal visible={modalNotifVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalNotifVisible(false)}>
         <View style={[styles.modalContainerFull, { backgroundColor: theme.bg }]}>
           <View style={[styles.modalHeaderFull, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
@@ -645,7 +641,6 @@ export default function Home({ navigation }: any) {
                     snapToOffsets={[0, 80]}
                     decelerationRate="fast"
                   >
-                    {/* CARTÃO DA NOTIFICAÇÃO (CLICÁVEL) */}
                     <TouchableOpacity 
                       style={[styles.cardNotifSwipe, { width: width - 40, backgroundColor: theme.card }]}
                       onPress={() => handleNotificacaoPress(item)}
@@ -666,7 +661,6 @@ export default function Home({ navigation }: any) {
                       </View>
                     </TouchableOpacity>
 
-                    {/* BOTÃO ESCONDIDO (APARECE QUANDO DESLIZAS PARA A ESQUERDA) */}
                     <TouchableOpacity 
                       style={styles.btnTrashSwipe}
                       onPress={() => apagarNotificacao(item.id)}
