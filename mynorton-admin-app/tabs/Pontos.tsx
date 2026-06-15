@@ -107,13 +107,10 @@ export default function Pontos() {
     if (logs) setHistorico(logs);
   }
 
-  // NOVO: Função para disparar a notificação
   async function enviarNotificacao(uid: string, tipo: string, titulo: string, corpo: string) {
     try {
-      // 1. Grava no Histórico In-App (Sino)
       await supabase.from('notificacoes').insert([{ user_id: uid, tipo, titulo, corpo, lida: false }]);
       
-      // 2. Dispara a Notificação Push para vibrar o telemóvel
       const { data: tokens } = await supabase.from('push_tokens').select('token').eq('user_id', uid);
       if (tokens && tokens.length > 0) {
         const msgs = tokens.map((t: any) => ({ to: t.token, sound: 'default', title: titulo, body: corpo }));
@@ -154,7 +151,6 @@ export default function Pontos() {
       nota: 'Atribuição de pontos na fatura'
     });
 
-    // NOVO: Notificar Cliente da Atribuição de Pontos
     await enviarNotificacao(
       cliente.id, 
       'pontos_vouchers', 
@@ -184,7 +180,6 @@ export default function Pontos() {
             nota: `Utilizou: ${voucher.titulo}`
           });
 
-          // NOVO: Notificar Cliente do Desconto do Voucher
           await enviarNotificacao(
             cliente.id, 
             'pontos_vouchers', 
