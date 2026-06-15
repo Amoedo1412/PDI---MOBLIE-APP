@@ -20,7 +20,6 @@ export default function EstadoRestaurante({ dados }: { dados?: any }) {
   useEffect(() => {
     fetchOcupacao();
 
-    // ESCUTA EM TEMPO REAL APENAS A OCUPAÇÃO
     const subscription = supabase
       .channel('restaurante_status')
       .on(
@@ -46,7 +45,6 @@ export default function EstadoRestaurante({ dados }: { dados?: any }) {
 
   async function fetchOcupacao() {
     try {
-      // Pedimos APENAS a taxa_ocupacao, evitando erros de colunas inexistentes
       const { data, error } = await supabase
         .from('restaurante')
         .select('taxa_ocupacao') 
