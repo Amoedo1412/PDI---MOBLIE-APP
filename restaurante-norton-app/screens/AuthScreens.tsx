@@ -12,14 +12,12 @@ const { width } = Dimensions.get('window');
 const COR_NORTON = '#FF6B00';
 
 export default function AuthScreen({ navigation }: any) {
-  // Login States
   const [identificador, setIdentificador] = useState('');
   const [password, setPassword] = useState('');
   const [mostrarPassword, setMostrarPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Recuperação de Pass States
   const [modalEsqueciVisible, setModalEsqueciVisible] = useState(false);
   const [recuperarEmail, setRecuperarEmail] = useState('');
   const [recuperarTelemovel, setRecuperarTelemovel] = useState('');
@@ -72,7 +70,6 @@ export default function AuthScreen({ navigation }: any) {
 
     setLoadingRecuperacao(true);
 
-    // Vai à base de dados procurar uma linha que tenha ESTE email E ESTE telemóvel
     const { data, error } = await supabase
       .from('perfis')
       .select('id')
@@ -82,7 +79,6 @@ export default function AuthScreen({ navigation }: any) {
 
     setLoadingRecuperacao(false);
 
-    // Se der erro (ex: não encontrou nenhuma linha com os dois dados iguais)
     if (error || !data) {
       Alert.alert(
         'Dados Incorretos', 
@@ -91,7 +87,6 @@ export default function AuthScreen({ navigation }: any) {
       return;
     }
 
-    // Se passou, a conta existe e os dados coincidem!
     Alert.alert('Sucesso!', 'Enviámos um link de recuperação para o teu e-mail.');
     setModalEsqueciVisible(false);
     setRecuperarEmail('');
@@ -166,7 +161,6 @@ export default function AuthScreen({ navigation }: any) {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* MODAL DE RECUPERAÇÃO DE PALAVRA-PASSE */}
       <Modal visible={modalEsqueciVisible} animationType="slide" transparent={true}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -229,7 +223,6 @@ const styles = StyleSheet.create({
   bottomBlob: { width: width, height: width, backgroundColor: 'rgba(0,0,0,0.02)', bottom: -width * 0.4, right: -width * 0.2 },
   inner: { flexGrow: 1, paddingHorizontal: 35, justifyContent: 'center', paddingBottom: 20 },
   
-  // Tipografia ajustada
   title: { fontSize: 38, fontWeight: 'bold', lineHeight: 44 }, 
   subtitle: { fontSize: 16, color: '#666', marginBottom: 35, marginTop: 5 },
   
@@ -251,7 +244,6 @@ const styles = StyleSheet.create({
   linkText: { fontSize: 15, color: '#666' },
   
 
-  // Estilos do Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#fff', borderRadius: 20, padding: 25, elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
