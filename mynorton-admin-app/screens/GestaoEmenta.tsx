@@ -94,7 +94,7 @@ export default function GestaoEmenta() {
   async function confirmarNewsletter() {
     Alert.alert(
       "Enviar Newsletter",
-      "Queres avisar todos os subscritores que a nova ementa já está disponível na app?",
+      "Queres avisar todos os subscritores e enviar-lhes um e-mail com a nova ementa?",
       [
         { text: "Cancelar", style: "cancel" },
         { text: "Sim, Enviar", onPress: enviarNewsletter }
@@ -105,53 +105,92 @@ export default function GestaoEmenta() {
   async function enviarNewsletter() {
     setLoadingNewsletter(true);
     try {
-      // 1. Quem quer receber?
-      const { data: perfis } = await supabase.from('perfis').select('id').eq('receber_newsletter', true);
+      const { data: perfis } = await supabase.from('perfis').select('id, email').eq('receber_newsletter', true);
       
       if (!perfis || perfis.length === 0) {
         Alert.alert('Aviso', 'Nenhum cliente subscreveu a newsletter ainda.');
         setLoadingNewsletter(false);
         return;
       }
-      
+
+      const { data: ementaSemana } = await supabase
+        .from('ementas')
+        .select(`dia_semana, pratos (nome, preco)`)
+        .eq('semana_ref', 1);
+
+      let corpoEmail = 'Olá! Aqui tens a ementa desta semana do Restaurante Norton:\n\n';
+
+      if (ementaSemana && ementaSemana.length > 0) {
+        DIAS.forEach(dia => {
+          const pratosDia = ementaSemana.filter(e => e.dia_semana === dia);
+          if (pratosDia.length > 0) {
+            corpoEmail += `📅 ${dia.toUpperCase()}\n`;
+            pratosDia.forEach(item => {
+              const prato = Array.isArray(item.pratos) ? item.pratos[0] : item.pratos;
+              if (prato) {
+                corpoEmail += `• ${prato.nome} - ${Number(prato.preco).toFixed(2)}€\n`;
+              }
+            });
+            corpoEmail += '\n';
+          }
+        });
+      } else {
+        corpoEmail += 'A nossa ementa para esta semana já está disponível na App. Vai lá espreitar!\n\n';
+      }
+      corpoEmail += 'Podes fazer a tua encomenda diretamente através da nossa App.\nBom apetite, Restaurante Norton.';
+
+      const emailsValidos = perfis.map(p => p.email).filter(e => e != null && e.trim() !== '');
+      const bccEmails = emailsValidos.join(','); 
+      const assunto = 'Ementa da Semana 🍽️ - Restaurante Norton';
+
+      const EMAILJS_SERVICE_ID = 'service_sk57xk9'; 
+      const EMAILJS_TEMPLATE_ID = 'template_14ydv8a';
+      const EMAILJS_PUBLIC_KEY = 'r2uqadAkqwJtzr2Ec';
+
       const userIds = perfis.map(p => p.id);
-      const titulo = 'Nova Ementa da Semana! 🍽️';
-      const corpo = 'Já atualizámos os pratos. Vem ver o que preparámos para ti no Restaurante Norton!';
+      const tituloPush = 'Nova Ementa da Semana! 🍽️';
+      const corpoPush = 'Já atualizámos os pratos. Vem ver o que preparámos para ti!';
 
-      // CORREÇÃO: Usar user_id em vez de cliente_id
-      const novasNotificacoes = userIds.map(id => ({
-        user_id: id,
-        tipo: 'newsletter_ementa',
-        titulo: titulo,
-        corpo: corpo
-      }));
-      await supabase.from('notificacoes').insert(novasNotificacoes);
+      await supabase.from('notificacoes').insert(
+        userIds.map(id => ({ user_id: id, tipo: 'newsletter_ementa', titulo: tituloPush, corpo: corpoPush }))
+      );
 
-      // CORREÇÃO: Usar user_id em vez de cliente_id
       const { data: tokens } = await supabase.from('push_tokens').select('token').in('user_id', userIds);
-
       if (tokens && tokens.length > 0) {
-        const messages = tokens.map(t => ({
-          to: t.token,
-          sound: 'default',
-          title: titulo,
-          body: corpo,
-        }));
-
+        const messages = tokens.map(t => ({ to: t.token, sound: 'default', title: tituloPush, body: corpoPush }));
         await fetch('https://exp.host/--/api/v2/push/send', {
           method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            'Accept-encoding': 'gzip, deflate',
-            'Content-Type': 'application/json',
-          },
+          headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
           body: JSON.stringify(messages),
         });
       }
 
-      Alert.alert('Sucesso!', `Newsletter enviada com sucesso para ${userIds.length} clientes.`);
+      const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          service_id: EMAILJS_SERVICE_ID,
+          template_id: EMAILJS_TEMPLATE_ID,
+          user_id: EMAILJS_PUBLIC_KEY,
+          template_params: {
+            assunto: assunto,
+            mensagem: corpoEmail,
+            bcc: bccEmails
+          }
+        })
+      });
+
+      if (response.ok) {
+        Alert.alert('Sucesso!', 'Ementa enviada por e-mail e notificação push para todos os clientes com sucesso!');
+      } else {
+        const errorText = await response.text();
+        Alert.alert('Aviso', `As notificações push foram enviadas, mas falhou o envio do e-mail. Detalhes: ${errorText}`);
+      }
+
     } catch (error) {
-      Alert.alert('Erro', 'Falha ao enviar newsletter.');
+      Alert.alert('Erro', 'Falha ao processar o envio.');
       console.log(error);
     } finally {
       setLoadingNewsletter(false);
