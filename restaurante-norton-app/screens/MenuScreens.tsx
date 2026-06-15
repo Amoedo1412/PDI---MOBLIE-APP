@@ -10,7 +10,7 @@ const COR_NORTON = '#FF6B00';
 export default function MenuScreen({ navigation }: any) {
   const { theme, isDark } = useTheme();
   const [ementaSemanal, setEmentaSemanal] = useState<any[]>([]);
-  const [restauranteInfo, setRestauranteInfo] = useState<any>(null); // NOVO: Estado para guardar o horário
+  const [restauranteInfo, setRestauranteInfo] = useState<any>(null); 
   const [loading, setLoading] = useState(true);
 
   const diasDaSemanaBase = [
@@ -31,7 +31,6 @@ export default function MenuScreen({ navigation }: any) {
   useEffect(() => {
     carregarDadosGlobais();
 
-    // NOVO: Realtime para atualizar a ementa ou os horários instantaneamente
     let ementaSub: any;
     let restSub: any;
 
@@ -55,11 +54,9 @@ export default function MenuScreen({ navigation }: any) {
     try {
       setLoading(true);
       
-      // Busca a informação de férias e horários do restaurante
       const { data: restData } = await supabase.from('restaurante').select('*').eq('id', 1).maybeSingle();
       if (restData) setRestauranteInfo(restData);
 
-      // Busca os pratos
       const { data, error } = await supabase
         .from('ementas')
         .select(`
@@ -74,13 +71,11 @@ export default function MenuScreen({ navigation }: any) {
 
       if (error) throw error;
 
-      // 1. Criar esqueleto vazio
       let semanaEstruturada = diasDaSemanaBase.map(dia => ({
         dia_semana: dia,
         pratos: [] as any[]
       }));
 
-      // 2. Preencher com dados da BD
       if (data) {
         data.forEach((item: any) => {
           const diaNome = (item.dia_semana || '').trim().toLowerCase();
@@ -93,11 +88,9 @@ export default function MenuScreen({ navigation }: any) {
         });
       }
 
-      // 3. Lógica de Reordenação (Hoje em primeiro)
-      const hojeJS = new Date().getDay(); // 0=Dom, 1=Seg...
-      const hojeIndex = hojeJS === 0 ? 6 : hojeJS - 1; // Converter para 0=Seg... 6=Dom
+      const hojeJS = new Date().getDay(); 
+      const hojeIndex = hojeJS === 0 ? 6 : hojeJS - 1; 
 
-      // Corta o array e junta-o novamente começando por "hoje"
       const ementaReordenada = [
         ...semanaEstruturada.slice(hojeIndex),
         ...semanaEstruturada.slice(0, hojeIndex)
@@ -141,7 +134,6 @@ const renderDia = ({ item: dia, index }: { item: any, index: number }) => {
       }
     }
 
-    // NOVA LÓGICA: Separar o estado de "Sem Pratos" do estado "Encerrado"
     const temPratos = dia.pratos.length > 0;
 
     return (
@@ -162,21 +154,19 @@ const renderDia = ({ item: dia, index }: { item: any, index: number }) => {
         
         <View style={[styles.divisor, { backgroundColor: eHoje ? COR_NORTON + '30' : theme.border }]} />
         
-        {/* Prioridade 1: Se o horário diz que está FECHADO ou FÉRIAS */}
         {diaFechadoPorHorario ? (
           <View style={[styles.containerEncerrado, { backgroundColor: theme.bg, borderColor: theme.border }]}>
             <Ionicons name={iconStatus} size={24} color={COR_NORTON} />
             <Text style={[styles.textoEncerrado, { color: theme.textSec }]}>{mensagemStatus}</Text>
           </View>
         ) : (
-          /* Prioridade 2: Se está ABERTO mas ainda não inseriste pratos na BD */
           !temPratos ? (
             <View style={[styles.containerEncerrado, { backgroundColor: theme.bg, borderColor: theme.border, borderStyle: 'dotted' }]}>
               <Ionicons name="restaurant-outline" size={24} color={theme.textSec} />
               <Text style={[styles.textoEncerrado, { color: theme.textSec }]}>Ementa em atualização...</Text>
             </View>
           ) : (
-            /* Prioridade 3: Se está ABERTO e TEM pratos */
+         
             dia.pratos.map((prato: any, pIndex: number) => (
               <View key={pIndex} style={[styles.containerPrato, { backgroundColor: theme.bg, borderColor: theme.border }]}>
                 {prato.imagem_url ? (
