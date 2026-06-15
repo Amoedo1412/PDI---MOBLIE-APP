@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, Alert } fro
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
 
-// A COR OFICIAL DO NORTON
 const COR_NORTON = '#FF6B00';
 
 interface RatingProps {
@@ -28,7 +27,6 @@ export default function RatingModal({ visible, pedidoId, onClose }: RatingProps)
 
     if (!error) {
       Alert.alert("Obrigado!", "A tua avaliação ajuda-nos a melhorar. Ganhaste +5 pontos!");
-      // Opcional: Lógica para adicionar 5 pontos ao saldo do utilizador aqui
       onClose();
     } else {
       Alert.alert("Erro", "Não foi possível enviar a avaliação.");
