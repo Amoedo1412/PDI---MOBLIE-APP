@@ -7,10 +7,8 @@ import { Platform } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 
-// IMPORTAR O useTheme DA TUA NUVEM
 import { ThemeProvider, useTheme } from './components/TemaContexto';
 
-// Importações dos ecrãs
 import Home from './tabs/Home';
 import Pontos from './tabs/Pontos';
 import Reservas from './screens/TakeAway'; 
@@ -26,7 +24,6 @@ const Tab = createBottomTabNavigator();
 const Stack = createStackNavigator();
 const AuthStack = createStackNavigator(); 
 
-// --- NAVEGAÇÃO POR ABAS (BOTTOM TABS) ---
 function TabNavigator() {
   const { theme, isDark } = useTheme();
 
@@ -43,7 +40,6 @@ function TabNavigator() {
         },
         tabBarActiveTintColor: '#FF6B00', 
         
-        // Preto no Modo Claro, Cinza no Modo Escuro!
         tabBarInactiveTintColor: isDark ? theme.textSec : '#1a1a1a', 
         
         headerShown: false,
@@ -70,32 +66,26 @@ function TabNavigator() {
   );
 }
 
-// --- COMPONENTE PRINCIPAL ---
 export default function App() {
   const [isLoading, setIsLoading] = useState(true); 
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    // Função silenciosa para validar se a conta ainda existe no servidor
     async function validarSessaoReal() {
-      // AGORA TAMBÉM CAPTURAMOS O ERRO (erroSessao)
       const { data: { session: sessaoAtual }, error: erroSessao } = await supabase.auth.getSession();
       
-      // Se houver um erro de Refresh Token ou a sessão for nula, forçamos o logout
       if (erroSessao || !sessaoAtual) {
         await supabase.auth.signOut();
         setSession(null);
         return;
       }
 
-      // O telemóvel tem a chave guardada, mas vamos confirmar à Base de Dados!
       const { data: perfilAtivo } = await supabase
         .from('perfis')
         .select('id')
         .eq('id', sessaoAtual.user.id)
         .maybeSingle();
 
-      // Se o perfil já não existir (foi apagado pelo Admin), forçamos Logout local
       if (!perfilAtivo) {
         await supabase.auth.signOut();
         setSession(null);
@@ -107,7 +97,6 @@ export default function App() {
 
     validarSessaoReal();
 
-    // Escutar mudanças de estado (quando o utilizador faz login/logout manualmente)
     const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, sessaoAlterada) => {
       if (sessaoAlterada) {
         const { data: perfilAtivo } = await supabase
