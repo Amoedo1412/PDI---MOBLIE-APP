@@ -27,18 +27,14 @@ export default function Perfil({ navigation }: any) {
   const [perfil, setPerfil] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Definições
   const [notificacoes, setNotificacoes] = useState(true);
   const [newsletter, setNewsletter] = useState(false);
   
-  // Imagem
   const [fotoPerfilUri, setFotoPerfilUri] = useState<string | null>(null);
 
-  // Modais
   const [modalEdicaoVisible, setModalEdicaoVisible] = useState(false);
   const [modalSobreVisible, setModalSobreVisible] = useState(false);
   
-  // Formulário Edição
   const [saving, setSaving] = useState(false);
   const [formNome, setFormNome] = useState('');
   const [formTelemovel, setFormTelemovel] = useState('');
