@@ -1,11 +1,9 @@
 import React, { createContext, useState, useContext } from 'react';
 
-// 1. Criamos a nossa "Nuvem"
 const ThemeContext = createContext<any>(null);
 
-// 2. O Provedor que vai envolver a aplicação toda
 export const ThemeProvider = ({ children }: any) => {
-  const [isDark, setIsDark] = useState(false); // Começa no modo claro
+  const [isDark, setIsDark] = useState(false); 
 
   const theme = {
     isDark,
@@ -13,7 +11,7 @@ export const ThemeProvider = ({ children }: any) => {
     card: isDark ? '#1E1E1E' : '#FFFFFF',
     text: isDark ? '#FFFFFF' : '#121212',
     textSec: isDark ? '#AAAAAA' : '#8E8E93',
-    subText: isDark ? '#FFFFFF' : '#8E8E93', // <-- SÓ TENS DE ADICIONAR ESTA LINHA!
+    subText: isDark ? '#FFFFFF' : '#8E8E93', 
     iconBg: isDark ? '#2C2C2C' : '#fdf3ea',
     border: isDark ? '#333333' : '#E5E5EA',
     orange: '#FF6B00',
@@ -35,5 +33,4 @@ export const ThemeProvider = ({ children }: any) => {
   );
 };
 
-// 3. O "Gancho" mágico que as páginas vão usar para aceder às cores
 export const useTheme = () => useContext(ThemeContext);
