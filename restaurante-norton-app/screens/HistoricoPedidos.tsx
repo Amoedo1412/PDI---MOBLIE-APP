@@ -18,7 +18,6 @@ export default function HistoricoPedidos({ navigation }: any) {
 
     let subscription: any;
 
-    // Função para configurar a escuta em tempo real
     const configurarRealtime = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -28,13 +27,12 @@ export default function HistoricoPedidos({ navigation }: any) {
         .on(
           'postgres_changes',
           {
-            event: 'UPDATE', // Ouve apenas atualizações (mudanças de estado, etc)
+            event: 'UPDATE', 
             schema: 'public',
             table: 'pedidos',
-            filter: `cliente_id=eq.${user.id}` // Filtra para escutar apenas os pedidos deste cliente
+            filter: `cliente_id=eq.${user.id}` 
           },
           (payload) => {
-            // Atualiza a lista local de pedidos instantaneamente com a nova informação
             setPedidos((pedidosAtuais) => 
               pedidosAtuais.map((pedido) => 
                 pedido.id === payload.new.id ? { ...pedido, ...payload.new } : pedido
@@ -47,7 +45,6 @@ export default function HistoricoPedidos({ navigation }: any) {
 
     configurarRealtime();
 
-    // Limpa a subscrição quando o utilizador sai da página para não gastar memória
     return () => {
       if (subscription) {
         supabase.removeChannel(subscription);
@@ -135,7 +132,6 @@ export default function HistoricoPedidos({ navigation }: any) {
               return (
                 <View key={pedido.id} style={[styles.cardPedido, { backgroundColor: theme.card, borderColor: theme.border }]}>
                   
-                  {/* CABEÇALHO DO CARTÃO */}
                   <View style={[styles.cardHeader, { borderBottomColor: theme.border }]}>
                     <Text style={[styles.dataPedido, { color: theme.textSec }]}>{formatarData(pedido.created_at)}</Text>
                     <View style={[styles.badgeStatus, { backgroundColor: statusInfo.corBg }]}>
@@ -144,15 +140,12 @@ export default function HistoricoPedidos({ navigation }: any) {
                     </View>
                   </View>
                   
-                  {/* CORPO DO CARTÃO */}
                   <View style={styles.cardBody}>
                     <View style={{ flex: 1, paddingRight: 15 }}>
                       <Text style={[styles.labelInfo, { color: theme.textSec }]}>Resumo da Encomenda:</Text>
                       
-                      {/* LÓGICA PARA PARTIR POR LINHAS E SEM CORTES */}
                       {(() => {
                         const partes = pedido.prato_nome.split('\n');
-                        // Substitui as vírgulas e os espaços da string guardada por uma quebra de linha real
                         const comida = partes[0].split(', ').join('\n');
                         const extras = partes.slice(1).join('\n');
 
@@ -177,7 +170,6 @@ export default function HistoricoPedidos({ navigation }: any) {
                     </View>
                   </View>
                   
-                  {/* RODAPÉ DO CARTÃO */}
                   <View style={styles.cardFooter}>
                     <Text style={[styles.totalLabel, { color: theme.textSec }]}>Total Pago:</Text>
                     <Text style={[styles.totalValor, { color: theme.text }]}>{Number(pedido.total_preco).toFixed(2)}€</Text>
