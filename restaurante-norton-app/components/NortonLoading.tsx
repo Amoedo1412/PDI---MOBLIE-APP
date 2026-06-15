@@ -4,14 +4,12 @@ import LottieView from 'lottie-react-native';
 
 const { width } = Dimensions.get('window');
 
-// A COR OFICIAL DO NORTON
 const COR_NORTON = '#FF6B00';
 
 export default function NortonLoading() {
   return (
     <View style={styles.container}>
       <LottieView
-        // O nome deve ser idêntico ao que aparece na tua pasta assets
         source={require('../assets/Restaurant website Pre loader.json')} 
         autoPlay
         loop
@@ -27,16 +25,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff', // Mantém o fundo branco para destacar a animação
+    backgroundColor: '#ffffff', 
   },
   lottie: {
-    width: width * 0.7, // Ajusta o tamanho para ser visível no centro
+    width: width * 0.7, 
     height: width * 0.7,
   },
   texto: {
     marginTop: 20,
     fontSize: 16,
-    color: COR_NORTON, // Atualizado para o Laranja oficial do Restaurante Norton
+    color: COR_NORTON, 
     fontWeight: 'bold',
   }
 });
