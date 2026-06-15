@@ -9,16 +9,13 @@ import * as Notifications from 'expo-notifications';
 
 import Auth from './Auth';
 
-// Importar o Contexto do Tema
 import { ThemeProvider, useTheme } from './components/TemaContexto';
 
-// Importar as páginas da barra inferior (Tabs)
 import Home from './tabs/Home';
 import Pedidos from './tabs/Pedidos';
 import Pontos from './tabs/Pontos';
 import Perfil from './tabs/Perfil'; 
 
-// Importar as páginas do Centro de Controlo (Screens)
 import GestaoUtilizadores from './screens/GestaoUtilizadores'; 
 import GestaoCatalogo from './screens/GestaoCatalogo';
 import GestaoEmenta from './screens/GestaoEmenta';
@@ -27,7 +24,6 @@ import PortalCriticas from './screens/PortalCriticas';
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// Criar a "Pilha" para o Centro de Controlo
 function HomeStack() {
   const { theme } = useTheme();
   return (
