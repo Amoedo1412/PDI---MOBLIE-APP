@@ -19,7 +19,6 @@ export default function Pedidos() {
   useEffect(() => {
     carregarPedidos();
     
-    // @ts-ignore
     const sub = supabase.channel('pedidos_admin')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'pedidos' }, 
@@ -49,34 +48,33 @@ export default function Pedidos() {
     setLoading(false);
   }
 
-  const confirmarAcao = (id: string, novoStatus: string, mensagemBotao: string, clienteId: string) => {
+  const confirmarAcao = (id: string, novoStatus: string, mensagemBotao: string, clienteId: string, preco: number) => {
     Alert.alert(
       "Confirmar Ação",
       `Tens a certeza que queres ${mensagemBotao.toLowerCase()}?`,
       [
         { text: "Cancelar", style: "cancel" },
-        { text: "Sim, Confirmar", onPress: () => atualizarStatus(id, novoStatus, clienteId) }
+        { text: "Sim, Confirmar", onPress: () => atualizarStatus(id, novoStatus, clienteId, preco) }
       ]
     );
   };
 
-  async function atualizarStatus(id: string, novoStatus: string, clienteId: string) {
-    // 1. Atualiza o estado na Base de Dados
+  async function atualizarStatus(id: string, novoStatus: string, clienteId: string, preco: number) {
     const { error } = await supabase
       .from('pedidos')
       .update({ status: novoStatus })
       .eq('id', id);
     
     if (error) {
-      Alert.alert('Erro de Permissão', error.message);
+      Alert.alert('Erro', error.message);
       return;
     } 
 
     carregarPedidos();
 
-    // 2. Prepara os textos da notificação
     let pushTitle = '';
     let pushBody = '';
+    let tipoNotif = 'pedido_status';
 
     if (novoStatus === 'confirmado') {
       pushTitle = 'Pedido Confirmado! 👨‍🍳';
@@ -84,25 +82,39 @@ export default function Pedidos() {
     } else if (novoStatus === 'pronto') {
       pushTitle = 'O teu pedido está pronto! 🛍️';
       pushBody = 'Já podes passar no Restaurante Norton para levantar a tua refeição.';
+    } 
+    else if (novoStatus === 'concluido' && preco > 0) {
+      const pontosGanhos = Math.floor(preco); // 1€ = 1 ponto (arredondado para baixo)
+      
+      const { data: ptData } = await supabase.from('pontos').select('saldo').eq('id_cliente', clienteId).maybeSingle();
+      const saldoAtual = ptData?.saldo || 0;
+      const novoSaldo = saldoAtual + pontosGanhos;
+
+      await supabase.from('pontos').upsert({ id_cliente: clienteId, saldo: novoSaldo }, { onConflict: 'id_cliente' });
+
+      await supabase.from('log_pontos').insert([{
+        cliente_id: clienteId,
+        quantidade: pontosGanhos,
+        nota: `Take-Away (${preco.toFixed(2)}€)`
+      }]);
+
+      pushTitle = 'Pontos Adicionados! ⭐';
+      pushBody = `Ganhaste ${pontosGanhos} pontos na tua última encomenda. Tens agora ${novoSaldo} pontos.`;
+      tipoNotif = 'pontos_vouchers';
     }
 
     if (pushTitle) {
       try {
-        // 3. GRAVA NO HISTÓRICO DE NOTIFICAÇÕES DO CLIENTE (com o ID do pedido para abrir o Modal)
         await supabase.from('notificacoes').insert([{ 
           user_id: clienteId, 
-          tipo: 'pedido_status', 
+          tipo: tipoNotif, 
           titulo: pushTitle, 
           corpo: pushBody, 
           lida: false,
-          data: { pedido_id: id } 
+          data: tipoNotif === 'pedido_status' ? { pedido_id: id } : null
         }]);
 
-        // 4. ENVIA A PUSH NOTIFICATION PARA O TELEMÓVEL
-        const { data: tokens } = await supabase
-          .from('push_tokens')
-          .select('token')
-          .eq('user_id', clienteId);
+        const { data: tokens } = await supabase.from('push_tokens').select('token').eq('user_id', clienteId);
 
         if (tokens && tokens.length > 0) {
           const messages = tokens.map(t => ({
@@ -115,11 +127,7 @@ export default function Pedidos() {
 
           await fetch('https://exp.host/--/api/v2/push/send', {
             method: 'POST',
-            headers: {
-              Accept: 'application/json',
-              'Accept-encoding': 'gzip, deflate',
-              'Content-Type': 'application/json',
-            },
+            headers: { Accept: 'application/json', 'Accept-encoding': 'gzip, deflate', 'Content-Type': 'application/json' },
             body: JSON.stringify(messages),
           });
         }
@@ -306,7 +314,7 @@ export default function Pedidos() {
                   {abaAtiva === 'ativos' && config.proxStatus !== '' && (
                     <TouchableOpacity 
                       style={[styles.btnAcao, { backgroundColor: config.btnCor }]} 
-                      onPress={() => confirmarAcao(item.id, config.proxStatus, config.btnTexto, item.cliente_id)}
+                      onPress={() => confirmarAcao(item.id, config.proxStatus, config.btnTexto, item.cliente_id, parseFloat(item.total_preco || 0))}
                     >
                       <Text style={styles.btnText}>{config.btnTexto}</Text>
                       <Ionicons name={config.iconeBtn as any} size={16} color="#FFF" />
@@ -336,66 +344,40 @@ export default function Pedidos() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { 
-    paddingTop: Platform.OS === 'ios' ? 60 : 40, 
-    paddingHorizontal: 20, 
-    borderBottomWidth: 1
-  },
+  header: { paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingHorizontal: 20, borderBottomWidth: 1 },
   titulo: { fontSize: 26, fontWeight: '900', marginBottom: 15 },
-  
   toolsRow: { flexDirection: 'row', gap: 10, marginBottom: 15 },
-  searchBox: { 
-    flex: 1, flexDirection: 'row', alignItems: 'center', 
-    borderRadius: 12, paddingHorizontal: 12, height: 46,
-    borderWidth: 1
-  },
+  searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 12, height: 46, borderWidth: 1 },
   searchIcon: { marginRight: 8 },
   searchInput: { flex: 1, fontSize: 15 },
-  btnOrder: { 
-    width: 46, height: 46, borderRadius: 12, 
-    borderWidth: 1,
-    justifyContent: 'center', alignItems: 'center'
-  },
-
+  btnOrder: { width: 46, height: 46, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
   tabsContainer: { flexDirection: 'row', gap: 15, paddingBottom: 15 },
   tab: { paddingVertical: 8, paddingHorizontal: 15, borderRadius: 20 },
   tabText: { fontWeight: '600' },
-  
-  card: { 
-    borderRadius: 20, padding: 20, marginBottom: 15, 
-    borderWidth: 1, elevation: 3, shadowOpacity: 0.05, shadowRadius: 10
-  },
+  card: { borderRadius: 20, padding: 20, marginBottom: 15, borderWidth: 1, elevation: 3, shadowOpacity: 0.05, shadowRadius: 10 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  
   clienteInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   avatarMini: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   avatarTxt: { fontSize: 16, fontWeight: 'bold' },
   nomeCliente: { fontSize: 15, fontWeight: 'bold' },
   tlmCliente: { fontSize: 12, marginTop: 2 },
-  
   statusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, gap: 6, marginLeft: 10 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   statusText: { fontSize: 11, fontWeight: '900' },
-  
   separator: { height: 1, marginVertical: 15 },
   detalhesTxt: { fontSize: 16, fontWeight: '700', lineHeight: 24, marginBottom: 10 },
-  
   boxNotas: { flexDirection: 'row', padding: 12, borderRadius: 12, marginBottom: 15, gap: 8, alignItems: 'flex-start' },
   notasTxt: { fontSize: 13, fontWeight: '600', flex: 1, lineHeight: 18 },
-
   timesContainer: { padding: 12, borderRadius: 12, marginBottom: 15, gap: 6 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   timeLabel: { fontSize: 13, flex: 1 },
   timeBold: { fontSize: 14, fontWeight: '800' },
-
   footerCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 15, borderTopWidth: 1 },
   priceRow: { flexDirection: 'column' },
   totalLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', marginBottom: 2 },
   totalValue: { fontSize: 18, fontWeight: '900' },
-
   btnAcao: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 15, gap: 8 },
   btnText: { color: '#FFF', fontWeight: '900', fontSize: 12 },
-  
   empty: { alignItems: 'center', marginTop: 80 },
   vazio: { textAlign: 'center', marginTop: 15, fontWeight: '600', paddingHorizontal: 20 }
 });
