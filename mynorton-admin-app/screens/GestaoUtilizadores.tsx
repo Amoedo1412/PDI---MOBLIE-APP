@@ -247,10 +247,8 @@ async function apagarUtilizador() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={[styles.modalBox, { backgroundColor: theme.card }]}>
             
-            {/* CABEÇALHO DO MODAL */}
             <View style={styles.modalHeaderRow}>
               
-              {/* Espaço vazio para manter o título perfeitamente centrado */}
               <View style={{ width: 30 }} />
 
               <Text style={[styles.modalTitle, { color: theme.text }]}>Ficha de Utilizador</Text>
@@ -262,7 +260,6 @@ async function apagarUtilizador() {
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
               
-              {/* SECÇÃO PRINCIPAL DO PERFIL */}
               <View style={styles.perfilInfo}>
                 {userSelecionado?.foto_url ? (
                   <View style={[styles.avatarGrandeContainer, { borderColor: theme.border }]}>
