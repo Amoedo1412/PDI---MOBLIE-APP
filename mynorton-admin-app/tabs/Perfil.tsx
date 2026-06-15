@@ -377,7 +377,6 @@ export default function Perfil({ navigation }: any) {
 
       </ScrollView>
 
-      {/* MODAL EDIÇÃO */}
       <Modal visible={modalEdicaoVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalEdicaoVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.modalContainer, { backgroundColor: theme.bg }]}>
           
@@ -479,7 +478,6 @@ export default function Perfil({ navigation }: any) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL SOBRE A APP ADMIN */}
       <Modal visible={modalSobreVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalSobreVisible(false)}>
         <View style={[styles.modalContainer, { backgroundColor: theme.bg }]}>
           <View style={[styles.modalHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
