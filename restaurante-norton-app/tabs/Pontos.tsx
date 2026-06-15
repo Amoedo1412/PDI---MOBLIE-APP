@@ -7,7 +7,6 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import * as Haptics from 'expo-haptics'; 
 import NortonLoading from '../components/NortonLoading';
 
-// IMPORTAÇÃO DA NUVEM GLOBAL
 import { useTheme } from '../components/TemaContexto';
 
 const { width } = Dimensions.get('window');
@@ -44,12 +43,10 @@ export default function Pontos() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // Adicionado (payload: any) para limpar os erros do TypeScript
       pontosSub = supabase.channel(`meus_pontos_${user.id}`)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'pontos', filter: `id_cliente=eq.${user.id}` }, 
         (payload: any) => setSaldo(payload.new.saldo)).subscribe();
 
-      // Adicionado (payload: any)
       vouchersSub = supabase.channel(`meus_vouchers_${user.id}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'vouchers' }, 
         (payload: any) => {
@@ -60,7 +57,6 @@ export default function Pontos() {
           }
         }).subscribe();
 
-      // Adicionado (payload: any)
       restSub = supabase.channel('restaurante_pts')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurante' }, 
         (payload: any) => setRestauranteInfo(payload.new)).subscribe();
