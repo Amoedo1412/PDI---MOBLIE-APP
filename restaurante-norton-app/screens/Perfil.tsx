@@ -12,6 +12,9 @@ import { decode } from 'base64-arraybuffer';
 import NortonLoading from '../components/NortonLoading'; 
 import { useTheme } from '../components/TemaContexto'; 
 
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+
 const { width } = Dimensions.get('window');
 const COR_NORTON = '#FF6B00';
 
@@ -21,20 +24,16 @@ export default function Perfil({ navigation }: any) {
   const [perfil, setPerfil] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Definições do Perfil
   const [notificacoes, setNotificacoes] = useState(true);
   const [newsletter, setNewsletter] = useState(false);
   
-  // Imagem de Perfil
   const [fotoPerfilUri, setFotoPerfilUri] = useState<string | null>(null);
 
-  // Modais e Formulário
   const [modalEdicaoVisible, setModalEdicaoVisible] = useState(false);
   const [modalPrivacidadeVisible, setModalPrivacidadeVisible] = useState(false);
   const [modalSobreVisible, setModalSobreVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   
-  // Estados do Formulário de Edição
   const [formNome, setFormNome] = useState('');
   const [formTelemovel, setFormTelemovel] = useState('');
   const [formSexo, setFormSexo] = useState('');
@@ -101,7 +100,26 @@ export default function Perfil({ navigation }: any) {
       const { error } = await supabase.from('perfis').update({ [campo]: valor }).eq('id', user.id);
       if (error) throw error;
       
-      if (campo === 'notificacoes_push') setNotificacoes(valor);
+      if (campo === 'notificacoes_push') {
+        setNotificacoes(valor);
+        if (!valor) {
+          await supabase.from('push_tokens').delete().eq('user_id', user.id);
+        } else {
+          try {
+            const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+            const tokenResponse = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+            if (tokenResponse && tokenResponse.data) {
+              await supabase.from('push_tokens').upsert(
+                { user_id: user.id, token: tokenResponse.data }, 
+                { onConflict: 'token' }
+              );
+            }
+          } catch (err) {
+            console.log("Erro ao reativar token de push:", err);
+          }
+        }
+      }
+      
       if (campo === 'receber_newsletter') setNewsletter(valor);
       
     } catch (error) {
@@ -299,7 +317,6 @@ export default function Perfil({ navigation }: any) {
     <View style={{ flex: 1, backgroundColor: theme.bg }}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }} bounces={false}>
         
-        {/* RETIRADO O BOTÃO DE VOLTAR E CENTRADO O TÍTULO */}
         <View style={styles.headerLaranja}>
           <Text style={styles.tituloHeader}>O Meu Perfil</Text>
         </View>
@@ -322,7 +339,6 @@ export default function Perfil({ navigation }: any) {
               </View>
             </View>
             
-            {/* ASSEGURADO QUE AS CORES ESTÃO VINCULADAS AO TEMA */}
             <Text style={[styles.nome, { color: theme.text }]}>{perfil?.nome || 'Utilizador Norton'}</Text>
             <Text style={[styles.email, { color: theme.subText }]}>{perfil?.email}</Text>
 
@@ -404,7 +420,6 @@ export default function Perfil({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* MODAL EDIÇÃO */}
       <Modal visible={modalEdicaoVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalEdicaoVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.modalContainer, { backgroundColor: theme.bg }]}>
           <View style={[styles.modalHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
@@ -473,7 +488,6 @@ export default function Perfil({ navigation }: any) {
               </TouchableOpacity>
             </View>
 
-            {/* SEÇÃO: SEGURANÇA */}
             <View style={[styles.passwordSection, { borderTopColor: theme.border }]}>
               <Text style={[styles.seccaoTitulo, { marginLeft: 0 }]}>Segurança</Text>
               <Text style={[styles.passwordHint, { color: theme.subText }]}>Preenche apenas se quiseres alterar a palavra-passe atual.</Text>
@@ -498,7 +512,6 @@ export default function Perfil({ navigation }: any) {
               </View>
             </View>
 
-            {/* SEÇÃO TERMINAR CONTA */}
             <View style={[styles.passwordSection, { borderTopColor: theme.border, marginTop: 20 }]}>
               <Text style={[styles.seccaoTitulo, { marginLeft: 0, color: '#ff3b30' }]}>Atenção</Text>
               <Text style={[styles.passwordHint, { color: theme.subText }]}>Esta ação é permanente e irá eliminar os teus dados.</Text>
@@ -513,7 +526,6 @@ export default function Perfil({ navigation }: any) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* MODAL PRIVACIDADE */}
       <Modal visible={modalPrivacidadeVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalPrivacidadeVisible(false)}>
         <View style={[styles.modalContainer, { backgroundColor: theme.bg }]}>
           <View style={[styles.modalHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
@@ -546,7 +558,6 @@ export default function Perfil({ navigation }: any) {
         </View>
       </Modal>
 
-      {/* MODAL SOBRE A APP */}
       <Modal visible={modalSobreVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setModalSobreVisible(false)}>
         <View style={[styles.modalContainer, { backgroundColor: theme.bg }]}>
           <View style={[styles.modalHeader, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
@@ -583,7 +594,7 @@ const styles = StyleSheet.create({
   headerLaranja: { 
     backgroundColor: COR_NORTON, 
     flexDirection: 'row', 
-    justifyContent: 'center', // Centra o título sem o botão de voltar
+    justifyContent: 'center', 
     alignItems: 'center',
     paddingHorizontal: 20, 
     paddingTop: Platform.OS === 'ios' ? 70 : 50, 
@@ -593,7 +604,6 @@ const styles = StyleSheet.create({
   },
   tituloHeader: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
   
-  // MARGEM AJUSTADA (de -40 para -35 para descer um pouco o cartão)
   body: { marginTop: -20 },
   
   infoUserCard: { position: 'relative', marginHorizontal: 20, borderRadius: 25, padding: 25, paddingTop: 15, alignItems: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 15 },
