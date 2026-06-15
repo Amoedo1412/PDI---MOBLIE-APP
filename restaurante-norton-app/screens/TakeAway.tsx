@@ -12,23 +12,19 @@ const COR_NORTON = '#FF6B00';
 export default function TakeAway({ navigation }: any) {
   const { theme, isDark } = useTheme();
 
-  // Estados de Disponibilidade
   const [isAberto, setIsAberto] = useState(true);
   const [mensagemFecho, setMensagemFecho] = useState('');
   
-  // Estados do Pedido
   const [pratos, setPratos] = useState<any[]>([]);
   const [loadingPratos, setLoadingPratos] = useState(true);
   const [loadingEnviar, setLoadingEnviar] = useState(false);
   const [observacoes, setObservacoes] = useState('');
   
-  // Estados de Extras
   const [precisaEmbalagem, setPrecisaEmbalagem] = useState(false);
   const [precisaSaco, setPrecisaSaco] = useState(false);
 
-  // Estado do Modal de Horas
   const [modalHoraVisible, setModalHoraVisible] = useState(false);
-  const horariosPossiveis = ['12:00', '12:30', '13:00', '13:30', '14:00', '14:30'];
+  const [horariosPossiveis, setHorariosPossiveis] = useState<string[]>([]);
 
   const mapeamentoDias: { [key: string]: number } = {
     'segunda': 1, 'segunda-feira': 1,
@@ -43,7 +39,6 @@ export default function TakeAway({ navigation }: any) {
   useEffect(() => {
     carregarDados();
 
-    // NOVO: OUVIR MUDANÇAS EM TEMPO REAL NO RESTAURANTE E NA EMENTA
     const restSub = supabase.channel('takeaway_restaurante')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'restaurante' }, () => {
         carregarDados();
@@ -148,11 +143,45 @@ export default function TakeAway({ navigation }: any) {
     return totalBase.toFixed(2);
   };
 
+  const gerarHorariosDisponiveis = () => {
+    const agora = new Date();
+    const horaAtual = agora.getHours();
+    const minutoAtual = agora.getMinutes();
+    const tempoAtualEmMinutos = horaAtual * 60 + minutoAtual;
+    
+    const margemDePreparacao = 30; // Minutos que a cozinha precisa
+    const tempoMinimoAceitavel = tempoAtualEmMinutos + margemDePreparacao;
+
+    const turnosAlmoco = ['12:00', '12:30', '13:00', '13:30', '14:00', '14:30'];
+    const turnosJantar = ['19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00'];
+    
+    const todosTurnos = [...turnosAlmoco, ...turnosJantar];
+
+    const horariosFiltrados = todosTurnos.filter(horaStr => {
+      const [h, m] = horaStr.split(':').map(Number);
+      const tempoDoTurno = h * 60 + m;
+      return tempoDoTurno >= tempoMinimoAceitavel;
+    });
+
+    return horariosFiltrados;
+  };
+
   const iniciarCheckout = () => {
     const selecionados = pratos.filter(p => p.quantidade > 0);
     if (selecionados.length === 0) {
       return Alert.alert("Carrinho Vazio", "Por favor, seleciona pelo menos um prato antes de encomendar.");
     }
+
+    const horarios = gerarHorariosDisponiveis();
+    
+    if (horarios.length === 0) {
+      return Alert.alert(
+        "Serviço Encerrado", 
+        "Já não estamos a aceitar encomendas para os horários de hoje. Tenta novamente amanhã!"
+      );
+    }
+
+    setHorariosPossiveis(horarios);
     setModalHoraVisible(true);
   };
 
@@ -315,7 +344,6 @@ export default function TakeAway({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* FOOTER */}
       <View style={[styles.footer, { backgroundColor: theme.card, borderColor: theme.border }]}>
         <View style={styles.footerInfo}>
           <Text style={[styles.totalLabel, { color: theme.textSec }]}>TOTAL A PAGAR</Text>
@@ -333,28 +361,29 @@ export default function TakeAway({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      {/* MODAL DE SELEÇÃO DE HORA */}
       <Modal visible={modalHoraVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]}>Hora de Recolha</Text>
-            <Text style={[styles.modalSub, { color: theme.textSec }]}>A que horas pretendes levantar o teu pedido no restaurante?</Text>
-            
-            <View style={styles.gridHoras}>
-              {horariosPossiveis.map(hora => (
-                <TouchableOpacity 
-                  key={hora} 
-                  style={[styles.modalHoraBtn, { backgroundColor: theme.card, borderColor: theme.border }]} 
-                  onPress={() => escolherHora(hora)}
-                >
-                  <Text style={[styles.modalHoraTxt, { color: theme.text }]}>{hora}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <View style={[styles.modalContent, { backgroundColor: theme.bg, borderColor: theme.border, maxHeight: '80%' }]}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>Hora de Recolha</Text>
+              <Text style={[styles.modalSub, { color: theme.textSec }]}>A que horas pretendes levantar o teu pedido no restaurante?</Text>
+              
+              <View style={styles.gridHoras}>
+                {horariosPossiveis.map(hora => (
+                  <TouchableOpacity 
+                    key={hora} 
+                    style={[styles.modalHoraBtn, { backgroundColor: theme.card, borderColor: theme.border }]} 
+                    onPress={() => escolherHora(hora)}
+                  >
+                    <Text style={[styles.modalHoraTxt, { color: theme.text }]}>{hora}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
 
-            <TouchableOpacity style={[styles.modalCancelBtn, { borderColor: theme.border }]} onPress={() => setModalHoraVisible(false)}>
-              <Text style={[styles.modalCancelTxt, { color: theme.textSec }]}>Cancelar</Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalCancelBtn, { borderColor: theme.border }]} onPress={() => setModalHoraVisible(false)}>
+                <Text style={[styles.modalCancelTxt, { color: theme.textSec }]}>Cancelar</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
