@@ -199,7 +199,6 @@ export default function Home({ navigation }: any) {
         <View style={styles.perfilRow}>
           <View>
             <Text style={[styles.saudacao, { color: theme.text }]}>Olá, {adminNome}!</Text>
-            {/* Subtítulo dinâmico */}
             <Text style={[styles.subSaudacao, { color: theme.subText }]}>
               Painel {isAdmin ? 'Administrativo' : 'de Funcionário'}
             </Text>
@@ -249,14 +248,13 @@ export default function Home({ navigation }: any) {
 
         <Text style={[styles.sectionTitle, { color: theme.subText }]}>Gestão de Conteúdos</Text>
         <View style={styles.grid}>
-          {/* Filtro restritivo para funcionários */}
           {[
             { t: 'Ementa', r: 'GestaoEmenta', i: 'calendar', adminOnly: false },
             { t: 'Pratos', r: 'GestaoCatalogo', i: 'restaurant', adminOnly: false },
             { t: 'Utilizadores', r: 'GestaoUtilizadores', i: 'people', adminOnly: true },
             { t: 'Críticas', r: 'PortalCriticas', i: 'star', adminOnly: true }
           ]
-          .filter(item => !item.adminOnly || isAdmin) // Se adminOnly for true, só mostra se isAdmin for true
+          .filter(item => !item.adminOnly || isAdmin) 
           .map((item, idx) => (
             <TouchableOpacity 
               key={idx} 
@@ -272,7 +270,6 @@ export default function Home({ navigation }: any) {
         </View>
       </ScrollView>
 
-      {/* MODAL HORÁRIO */}
       <Modal visible={modalHorarioVisivel} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.bg, maxHeight: '90%' }]}>
@@ -363,7 +360,6 @@ export default function Home({ navigation }: any) {
         </View>
       </Modal>
 
-      {/* MODAL FÉRIAS */}
       <Modal visible={modalFeriasVisivel} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: theme.bg }, (showDatePicker && Platform.OS === 'ios') && { height: '80%' }]}>
