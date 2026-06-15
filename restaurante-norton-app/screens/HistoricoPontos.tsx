@@ -32,8 +32,7 @@ export default function HistoricoPontos({ navigation }: any) {
         .on(
           'postgres_changes', 
           { event: 'INSERT', schema: 'public', table: 'log_pontos', filter: `cliente_id=eq.${user.id}` }, 
-          () => carregarDadosPontos() // Atualiza a lista toda quando há um movimento novo
-        )
+          () => carregarDadosPontos() 
         .subscribe();
     };
 
@@ -115,15 +114,12 @@ export default function HistoricoPontos({ navigation }: any) {
             </View>
           ) : (
             historico.map((log) => {
-              // LÓGICA INTELIGENTE (Igual ao Admin)
               const isAtribuicao = log.quantidade > 0;
               const isResgate = log.quantidade < 0;
               const isUtilizacao = log.quantidade === 0;
 
-              // Se houver nota guardada na BD mostra a nota, senão usa as labels padrão
               const labelHistorico = log.nota ? log.nota : (isAtribuicao ? "Pontos Atribuídos" : (isResgate ? "Resgate Voucher" : "Voucher Utilizado"));
 
-              // Define os ícones e cores com base no tipo de movimento
               let iconName = "checkmark-done-outline";
               let iconColor = theme.orange;
               let iconBg = "rgba(255, 107, 0, 0.1)";
@@ -153,7 +149,6 @@ export default function HistoricoPontos({ navigation }: any) {
                     </Text>
                   </View>
                   
-                  {/* Se for 0 (Voucher na caixa), mostra um ícone de certo, senão mostra os pontos */}
                   {isUtilizacao ? (
                     <Ionicons name="checkmark-circle" size={24} color={theme.orange} />
                   ) : (
