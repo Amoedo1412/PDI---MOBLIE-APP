@@ -99,10 +99,8 @@ export default function GestaoUtilizadores({ navigation }: any) {
   }
 
 async function apagarUtilizador() {
-    // 1. Verifica se não há utilizador selecionado ou se o admin está a tentar apagar-se a si próprio
     if (!userSelecionado || userSelecionado.id === meuId) return;
 
-    // 2. NOVA REGRA DE SEGURANÇA: Bloqueia a eliminação de outros Administradores
     if (userSelecionado.tipo_utilizador === 'admin') {
       Alert.alert('Acesso Negado 🛑', 'Não tens permissão para eliminar a conta de outro administrador.');
       return;
@@ -117,15 +115,13 @@ async function apagarUtilizador() {
           const idParaApagar = userSelecionado.id;
           setModalVisivel(false);
           
-          // Atualização Otimista: Tira logo da lista no ecrã
           setUtilizadores(prev => prev.filter(u => u.id !== idParaApagar));
           
-          // Chama a função poderosa do SQL para apagar o login
           const { error } = await supabase.rpc('apagar_utilizador_auth', { uid: idParaApagar });
           
           if (error) {
             Alert.alert("Erro", "Não foi possível apagar o login do utilizador.");
-            carregarUtilizadores(true); // Recarrega a lista se falhar
+            carregarUtilizadores(true); 
           }
         }
       }
