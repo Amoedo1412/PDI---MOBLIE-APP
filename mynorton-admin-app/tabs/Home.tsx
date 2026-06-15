@@ -15,7 +15,6 @@ export default function Home({ navigation }: any) {
   const { theme, isDark } = useTheme();
   const [adminNome, setAdminNome] = useState('Admin');
   
-  // NOVO: Estado para verificar se é administrador
   const [isAdmin, setIsAdmin] = useState(false);
   
   const [percentagem, setPercentagem] = useState(0);
@@ -64,12 +63,10 @@ export default function Home({ navigation }: any) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // ATUALIZADO: Pede também o tipo_utilizador à tabela perfis
         const { data } = await supabase.from('perfis').select('nome, tipo_utilizador').eq('id', user.id).single();
         
         if (data?.nome) setAdminNome(data.nome.split(' ')[0]);
         
-        // Verifica as permissões
         if (data?.tipo_utilizador === 'admin') {
           setIsAdmin(true);
         } else {
@@ -202,7 +199,7 @@ export default function Home({ navigation }: any) {
         <View style={styles.perfilRow}>
           <View>
             <Text style={[styles.saudacao, { color: theme.text }]}>Olá, {adminNome}!</Text>
-            {/* ATUALIZADO: Subtítulo dinâmico */}
+            {/* Subtítulo dinâmico */}
             <Text style={[styles.subSaudacao, { color: theme.subText }]}>
               Painel {isAdmin ? 'Administrativo' : 'de Funcionário'}
             </Text>
@@ -252,7 +249,7 @@ export default function Home({ navigation }: any) {
 
         <Text style={[styles.sectionTitle, { color: theme.subText }]}>Gestão de Conteúdos</Text>
         <View style={styles.grid}>
-          {/* ATUALIZADO: Filtro restritivo para funcionários */}
+          {/* Filtro restritivo para funcionários */}
           {[
             { t: 'Ementa', r: 'GestaoEmenta', i: 'calendar', adminOnly: false },
             { t: 'Pratos', r: 'GestaoCatalogo', i: 'restaurant', adminOnly: false },
