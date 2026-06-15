@@ -217,7 +217,6 @@ export default function GestaoEmenta() {
           </TouchableOpacity>
         ))}
         
-        {/* BOTÕES DE ACÃO DO CABEÇALHO */}
         <View style={styles.headerAcoes}>
           <TouchableOpacity style={styles.btnHeaderIcon} onPress={confirmarNewsletter} disabled={loadingNewsletter}>
             {loadingNewsletter ? <ActivityIndicator size="small" color="#28A745" /> : <Ionicons name="megaphone" size={24} color={isDark ? '#34C759' : '#28A745'} />}
