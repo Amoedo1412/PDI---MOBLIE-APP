@@ -28,7 +28,6 @@ export default function Auth() {
     setLoading(true);
     let emailParaLogin = inputLimpo;
 
-    // Login com telemóvel
     if (!inputLimpo.includes('@')) {
       const { data: perfil, error: fetchError } = await supabase
         .from('perfis')
