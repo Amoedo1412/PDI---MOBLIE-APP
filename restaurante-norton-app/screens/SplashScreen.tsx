@@ -9,7 +9,6 @@ const COR_NORTON = '#FF6B00';
 export default function SplashScreen({ onFinish }: { onFinish: () => void }) {
   return (
     <View style={styles.container}>
-      {/* Animação Lottie do Chapéu a cair */}
       <LottieView
         source={require('../assets/Restaurant website Pre loader.json')} 
         autoPlay
@@ -19,7 +18,6 @@ export default function SplashScreen({ onFinish }: { onFinish: () => void }) {
         style={styles.lottie}
       />
 
-      {/* Nome do Restaurante com Tipografia Norton */}
       <View style={styles.textContainer}>
         <Text style={styles.logoText}>
           Restaurante <Text style={styles.logoDestaque}>Norton</Text>
