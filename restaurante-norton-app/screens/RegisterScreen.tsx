@@ -17,24 +17,20 @@ const COR_NORTON = '#FF6B00';
 export default function RegisterScreen({ navigation }: any) {
   const [step, setStep] = useState(1);
 
-  // Passo 1: Identidade e Contacto
   const [nome, setNome] = useState('');
   const [email, setEmail] = useState('');
   const [telemovel, setTelemovel] = useState('');
 
-  // Passo 2: Dados Pessoais
   const [dataNasc, setDataNasc] = useState(new Date(2000, 0, 1));
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [dataAlterada, setDataAlterada] = useState(false);
   const [sexo, setSexo] = useState('');
   const [modalSexoVisible, setModalSexoVisible] = useState(false); 
   
-  // Passo 3: Segurança
   const [password, setPassword] = useState('');
   const [confirmarPassword, setConfirmarPassword] = useState('');
   const [mostrarPassword, setMostrarPassword] = useState(false);
 
-  // Passo 4: Fotografia e Definições
   const [fotoUri, setFotoUri] = useState<string | null>(null);
   const [fotoBase64, setFotoBase64] = useState<string | null>(null);
   const [notificacoes, setNotificacoes] = useState(false); 
@@ -43,7 +39,6 @@ export default function RegisterScreen({ navigation }: any) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // --- FUNÇÕES AUXILIARES ---
   const formatarDataParaBD = (data: Date) => data.toISOString().split('T')[0];
 
   const onChangeDate = (event: any, selectedDate?: Date) => {
@@ -75,7 +70,6 @@ export default function RegisterScreen({ navigation }: any) {
     }
   }
 
-  // --- NAVEGAÇÃO ENTRE PASSOS ---
   const handleAvancar = () => {
     setError('');
     
@@ -109,7 +103,6 @@ export default function RegisterScreen({ navigation }: any) {
     }
   };
 
-  // --- CRIAÇÃO DA CONTA FINAL ---
   async function handleRegisterFinal() {
     setError('');
     setLoading(true);
@@ -172,7 +165,6 @@ export default function RegisterScreen({ navigation }: any) {
       }
 
       Alert.alert('Bem-vindo!', 'Conta registada com sucesso.');
-      // A LINHA DO NAVEGAR FOI TOTALMENTE REMOVIDA AQUI!
     }
     setLoading(false);
   }
@@ -387,7 +379,6 @@ const styles = StyleSheet.create({
   actionText: { fontSize: 22, fontWeight: 'bold', marginRight: 15, color: '#333' },
   goBtn: { width: 60, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
 
-  // ESTILOS DO NOVO MODAL DE SEXO
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { backgroundColor: '#fff', width: '80%', borderRadius: 20, padding: 20, elevation: 10, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 10 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: COR_NORTON, textAlign: 'center' },
